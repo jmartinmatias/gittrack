@@ -1,0 +1,51 @@
+# gittrack configuration
+
+db_path = "gittrack.db"
+
+[github]
+# The token is read from this environment variable (never stored in this file).
+# Falls back to `gh auth token` when unset.
+token_env = "GITHUB_TOKEN"
+use_gh_cli = true
+
+[universe]
+# Size of the tracked universe, ranked by absolute stars.
+# 100 is a calibration set: these repos are saturated and rarely spike, but they
+# define what "normal" growth looks like. Raise to 1000-10000 to actually hunt.
+top_n = 100
+min_stars = 50
+watchlist = []
+exclude_archived = true
+exclude_forks = true
+exclude_name_contains = []
+discover_every_hours = 24.0
+# Per-run cap on individually-fetched repos (those the bulk search no longer
+# returns). Raise once authenticated; 200/run is safe on any budget.
+max_straggler_fetches = 200
+
+[trending]
+# GitHub Trending costs no API quota and surfaces repos you are not yet
+# tracking - which is the one thing polling a top-N universe cannot do.
+enabled = true
+since = ["daily"]
+languages = [""]      # "" is the all-languages board; add e.g. "rust", "python"
+auto_track = true     # add trending repos to the tracked universe
+request_delay = 1.2   # seconds between board fetches (politeness, not a limit)
+
+[metrics]
+default_window_days = 7.0
+baseline_days = 90.0
+min_observations = 8
+min_baseline_days = 14.0
+
+[scoring]
+# Relative weights of the three heat components (normalised internally).
+w_z = 0.45      # abnormality vs the repo's own history
+w_rel = 0.30    # cross-sectional rank of relative growth
+w_accel = 0.25  # is the rate itself increasing
+breakout_heat = 60.0
+breakout_min_z = 3.0
+
+[server]
+host = "127.0.0.1"
+port = 8787
