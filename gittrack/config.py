@@ -60,6 +60,25 @@ class TrendingConfig:
 
 
 @dataclass
+class NotifyConfig:
+    # Post a macOS notification when a repo newly enters the digest.
+    macos: bool = True
+    # Slack incoming-webhook URL. Empty disables it.
+    slack_webhook: str = ""
+    # Only notify for repos that were not in the previous digest.
+    on_new_only: bool = True
+
+
+@dataclass
+class DigestConfig:
+    # Repos above this many stars are never the answer: they are saturated.
+    max_stars: int = 100_000
+    limit: int = 7
+    # Window the digest's rank trend and fork growth are measured over.
+    over_days: float = 7.0
+
+
+@dataclass
 class MetricsConfig:
     default_window_days: float = 7.0
     # How far back the "what is normal for this repo" baseline reaches.
@@ -91,6 +110,8 @@ class Config:
     github: GitHubConfig = field(default_factory=GitHubConfig)
     universe: UniverseConfig = field(default_factory=UniverseConfig)
     trending: TrendingConfig = field(default_factory=TrendingConfig)
+    notify: NotifyConfig = field(default_factory=NotifyConfig)
+    digest: DigestConfig = field(default_factory=DigestConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     scoring: ScoringConfig = field(default_factory=ScoringConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -139,6 +160,8 @@ def load(explicit: str | None = None) -> Config:
         github=_merge(GitHubConfig, raw.get("github", {})),
         universe=_merge(UniverseConfig, raw.get("universe", {})),
         trending=_merge(TrendingConfig, raw.get("trending", {})),
+        notify=_merge(NotifyConfig, raw.get("notify", {})),
+        digest=_merge(DigestConfig, raw.get("digest", {})),
         metrics=_merge(MetricsConfig, raw.get("metrics", {})),
         scoring=_merge(ScoringConfig, raw.get("scoring", {})),
         server=_merge(ServerConfig, raw.get("server", {})),
@@ -185,6 +208,18 @@ since = ["daily"]
 languages = [""]      # "" is the all-languages board; add e.g. "rust", "python"
 auto_track = true     # add trending repos to the tracked universe
 request_delay = 1.2   # seconds between board fetches (politeness, not a limit)
+
+[digest]
+# The shortlist: what deserves attention right now, and why.
+max_stars = 100000    # saturated giants are never the answer
+limit = 7
+over_days = 7.0
+
+[notify]
+# Tell me when something new enters the digest.
+macos = true          # macOS notification centre
+slack_webhook = ""    # an incoming-webhook URL; empty disables
+on_new_only = true    # only for repos not in the previous digest
 
 [metrics]
 default_window_days = 7.0

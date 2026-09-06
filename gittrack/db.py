@@ -14,7 +14,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -120,6 +120,14 @@ CREATE TABLE IF NOT EXISTS accel (
     PRIMARY KEY (repo_id, ts, language)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_accel_ts ON accel(ts);
+
+-- Repos the user has looked at. The digest skips these so it keeps surfacing
+-- what is new rather than the same names every morning.
+CREATE TABLE IF NOT EXISTS seen (
+    full_name TEXT PRIMARY KEY COLLATE NOCASE,
+    ts        INTEGER NOT NULL,
+    note      TEXT
+);
 """
 
 
@@ -595,6 +603,74 @@ def accel_history(conn: sqlite3.Connection, full_name: str, language: str = "",
         " JOIN repos r ON r.id = a.repo_id"
         " WHERE r.full_name = ? COLLATE NOCASE AND a.language = ? AND a.ts >= ?"
         " ORDER BY a.ts", (full_name, language, since)).fetchall()
+
+
+# ------------------------------------------------------------------------ seen
+
+
+def mark_seen(conn: sqlite3.Connection, full_name: str, note: str | None = None,
+              ts: int | None = None) -> None:
+    conn.execute(
+        "INSERT INTO seen (full_name, ts, note) VALUES (?, ?, ?)"
+        " ON CONFLICT(full_name) DO UPDATE SET ts = excluded.ts,"
+        " note = COALESCE(excluded.note, seen.note)",
+        (full_name, ts or int(time.time()), note))
+
+
+def unmark_seen(conn: sqlite3.Connection, full_name: str) -> int:
+    return conn.execute("DELETE FROM seen WHERE full_name = ? COLLATE NOCASE",
+                        (full_name,)).rowcount
+
+
+def seen_map(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
+    return {r["full_name"]: r for r in conn.execute("SELECT * FROM seen").fetchall()}
+
+
+# ---------------------------------------------------------------- meta / memory
+
+
+def get_meta(conn: sqlite3.Connection, key: str, default=None):
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return json.loads(row["value"]) if row else default
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value) -> None:
+    conn.execute("INSERT INTO meta (key, value) VALUES (?, ?)"
+                 " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                 (key, json.dumps(value)))
+
+
+# -------------------------------------------------------------------- coverage
+
+
+def run_coverage(conn: sqlite3.Connection, kind: str, interval_s: float,
+                 window_s: float = 7 * 86400, now: int | None = None) -> dict:
+    """How many scheduled runs actually happened.
+
+    A laptop that sleeps overnight silently drops readings; the numbers still
+    look fine and the gap is invisible. This makes it visible: expected runs
+    over the window versus the runs that landed, and the largest hole.
+    """
+    now = now or int(time.time())
+    rows = conn.execute(
+        "SELECT started_at FROM runs WHERE kind = ? AND error IS NULL"
+        " AND started_at >= ? ORDER BY started_at",
+        (kind, now - window_s)).fetchall()
+    stamps = [r["started_at"] for r in rows]
+    if len(stamps) < 2:
+        return {"kind": kind, "actual": len(stamps), "expected": None,
+                "pct": None, "largest_gap_h": None}
+    span = now - stamps[0]
+    expected = max(1, round(span / interval_s))
+    gaps = [b - a for a, b in itertools.pairwise(stamps)] + [now - stamps[-1]]
+    return {
+        "kind": kind,
+        "actual": len(stamps),
+        "expected": expected,
+        "pct": round(min(1.0, len(stamps) / expected), 3),
+        "largest_gap_h": round(max(gaps) / 3600, 1),
+        "since": stamps[0],
+    }
 
 
 def stats(conn: sqlite3.Connection) -> dict:

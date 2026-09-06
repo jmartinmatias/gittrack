@@ -285,6 +285,37 @@ def render_trending_summary(summary: dict, limit: int = 25,
                       "one appearance is an afternoon.[/dim]")
 
 
+def render_digest(d: dict, console: Console | None = None) -> None:
+    """The shortlist, one repo per block, reasons in plain words."""
+    console = console or Console()
+    items = d["items"]
+    console.print()
+    if not items:
+        console.print("[dim]nothing stands out right now"
+                      + (f" ({d['skipped_seen']} already seen)" if d["skipped_seen"] else "")
+                      + "[/dim]")
+        return
+    console.print(Text(f"{len(items)} worth a look", style="bold"), end="  ")
+    console.print(Text(f"of {d['considered']} on the boards; "
+                       f"{d['skipped_giants']} giants and {d['skipped_seen']} seen skipped",
+                       style="dim"))
+    console.print()
+    for i, it in enumerate(items, 1):
+        head = Text()
+        head.append(f"{i:>2}. ", style="dim")
+        head.append(it["full_name"], style="bold")
+        head.append(f"  {compact(it['stars'])}\u2605", style="dim")
+        if it.get("language"):
+            head.append(f"  {it['language']}", style="dim")
+        console.print(head)
+        for why in it["reasons"]:
+            console.print(Text(f"      \u2022 {why}", style="green" if why.startswith(
+                ("small, surging", "small and", "surging and")) else ""))
+        console.print(Text(f"      {it['url']}", style="dim"))
+    console.print()
+    console.print("[dim]mark one reviewed with: gittrack seen owner/name[/dim]")
+
+
 def render_show(m: mx.RepoMetrics, repo_row, series: list, hot_since: int | None,
                 console: Console | None = None) -> None:
     console = console or Console()

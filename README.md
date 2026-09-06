@@ -2,7 +2,7 @@
 
 Spot GitHub repos gaining **abnormal** traction, not repos that are merely large.
 
-![The gittrack dashboard](docs/landscape.jpg)
+![The gittrack dashboard](docs/digest.jpg)
 
 gittrack snapshots GitHub Trending and the top-N repos by stars, stores the
 history, and ranks by how unusual a repo's current growth is against its own
@@ -35,6 +35,73 @@ whose whole life happened inside the window.
 **Status:** alpha, and useful from day one, but the signals that need history
 (rank trend, fork growth, z-scores) fill in over the first days of running.
 
+
+## The digest: what deserves attention, and why
+
+```
+$ gittrack digest
+
+7 worth a look  of 52 on the boards; 7 giants and 0 seen skipped
+
+ 1. debpalash/VoiceStudio  19k*  Python
+      * small, surging and being forked
+      * 4.1x its own monthly pace
+      * climbed 7 places on the weekly board
+      * on 2 boards at once
+      https://github.com/debpalash/VoiceStudio
+ ...
+```
+
+This is the product. The charts and the table are evidence; the digest is the
+answer. It sits at the top of the dashboard and is one command in the terminal.
+
+It is built only from signals that work on day one - the merged board, surge,
+acceleration, fork adoption and rank movement - and **every entry states its
+reasons in plain words**, so you can disagree with it. Two exclusions do most of
+the work:
+
+- **Saturated giants** (over 100k stars by default) are never the answer. A
+  250k-star project cannot gain 60% of itself in a week.
+- **Repos you have marked seen** are skipped, so the list is new each morning
+  rather than the same names in the same order.
+
+```bash
+gittrack seen owner/name --note "looked, real"   # the digest moves on
+gittrack seen --list
+gittrack seen owner/name --undo
+gittrack digest --include-seen
+gittrack digest --json                            # for piping anywhere
+```
+
+### Being told, instead of checking
+
+"Before anybody" is a property of being *told*, not of having a dashboard. Every
+hourly sweep rebuilds the digest and compares it with the last one; repos that
+newly entered trigger a notification. Two channels to start:
+
+```toml
+[notify]
+macos = true          # macOS notification centre
+slack_webhook = ""    # an incoming-webhook URL; empty disables
+on_new_only = true
+```
+
+A failed notification never fails the sweep that produced it. Turn it off for a
+single run with `gittrack run --no-notify`, or fire one by hand with
+`gittrack digest --notify`.
+
+### Coverage: knowing when the data is thin
+
+A laptop that sleeps overnight silently drops readings, and the numbers still
+look fine. `gittrack status` and the digest header now report **coverage** - the
+share of scheduled sweeps that actually landed, and the largest hole:
+
+```
+coverage      30 of ~49 hourly sweeps landed (61%)  largest gap 10.5h - the machine sleeps
+```
+
+A quiet digest is only trustworthy if you know the collector was awake. If the
+number is low, see *Where to take it next* for the fix.
 
 ## Read this before you trust the top 100
 
@@ -177,7 +244,9 @@ gittrack serve         # dashboard on http://127.0.0.1:8787
 
 | Command | What it does |
 |---|---|
-| `gittrack run` | Discover + snapshot. This is what cron calls. |
+| `gittrack digest` | The shortlist: what deserves attention right now, and why. `--json`, `--notify`, `--include-seen` |
+| `gittrack seen owner/name` | Mark a repo reviewed so the digest moves on. `--note`, `--undo`, `--list` |
+| `gittrack run` | Discover + snapshot + trending sweep + digest + notify. This is what cron calls. |
 | `gittrack top` | The leaderboard. `--by heat\|z\|velocity\|rel-velocity\|accel\|stars`, `--window`, `--min-stars`, `--max-stars`, `--language`, `--max-age-days`, `--min-z`, `--spark`, `--json`, `--csv` |
 | `gittrack trending` | Read GitHub Trending and diff it against a previous reading. Costs no API quota. |
 | `gittrack show owner/repo` | Every metric for one repo, plus a 30-day sparkline. |

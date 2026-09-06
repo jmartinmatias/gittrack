@@ -349,6 +349,34 @@
   .netchip.down { color: var(--critical); }
   .netchip.flat { color: var(--text-muted); }
   tbody tr { height: 40px; }
+  /* The digest sits above everything: it is the answer, the charts are evidence. */
+  .digest { margin: 0 0 14px; padding: 14px 18px; }
+  .digest .dh { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .digest .dh h2 { font-size: 14px; margin: 0; font-weight: 650; }
+  .digest .dh .sub { font-size: 12px; }
+  .digest ol { list-style: none; margin: 10px 0 0; padding: 0;
+               display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+               gap: 8px 18px; }
+  .digest li { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px;
+               align-items: start; padding: 8px 8px 8px 4px; border-radius: 8px;
+               cursor: pointer; }
+  .digest li:hover { background: var(--hover); }
+  .digest li[aria-selected="true"] { background: var(--selected); }
+  .digest .num { color: var(--text-muted); font-size: 12px; text-align: right;
+                 padding-top: 2px; }
+  .digest .name { font-weight: 600; }
+  .digest .meta { color: var(--text-muted); font-size: 11.5px; margin-left: 6px; }
+  .digest .why { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .digest .why span { font-size: 11px; padding: 1px 7px; border-radius: 999px;
+                      background: var(--track); color: var(--text-secondary); }
+  .digest .why span.gold { background: var(--gold-wash); color: var(--gold);
+                           font-weight: 650; }
+  .digest .seen-btn { font-size: 11px; padding: 3px 8px; color: var(--text-secondary); }
+  .digest .seen-btn:hover { color: var(--text-primary); }
+  .cov { font-size: 11.5px; padding: 1px 7px; border-radius: 999px;
+         border: 1px solid currentColor; font-variant-numeric: tabular-nums; }
+  .cov.ok { color: var(--good); }  .cov.warn { color: var(--warning); }
+  .cov.bad { color: var(--critical); }
   .landscape { margin: 0 0 16px; }
   .landscape summary { font-size: 12.5px; color: var(--text-secondary);
                        cursor: pointer; margin-bottom: 10px; user-select: none; }
@@ -495,6 +523,7 @@
       <span class="fgroup"><span class="flabel">summarise over</span>
         <span class="seg" id="t-over" role="group" aria-label="Summary window"></span></span>
     </div>
+    <section class="digest card" id="digest" hidden></section>
     <div class="note" id="t-note" hidden>
       <span class="body" id="t-note-body"></span>
       <button class="toggle" id="t-note-toggle" type="button">more</button>
@@ -2022,6 +2051,7 @@ const tState = {
   since: "combined", lang: "", compare: "1d", over: "1w", rankBy: "surge",
   armDiff: false, flash: null, flashTimer: null, gold: null,
   relations: null, theme: null, themeRepos: null, hoverRepos: null,
+  digest: null, showSeen: false,
   sort: "rank", dir: 1, data: null, selected: null,
 };
 
@@ -2462,6 +2492,7 @@ function clearPick() {
   tState.selected = null;
   document.getElementById("t-detail").hidden = true;
   tRenderRows();
+  if (tState.digest) renderDigest();
   const box = document.getElementById("landscape");
   if (box && box._redraw) box._redraw();
 }
@@ -2482,6 +2513,7 @@ async function tSelect(name) {
   host.hidden = false;
   host.replaceChildren(el("div", "card", "loading…"));
   tRenderRows();
+  if (tState.digest) renderDigest();
   // Repaint the charts so the pick is visible in all three, then find the row.
   const lbox = document.getElementById("landscape");
   if (lbox && lbox._redraw) lbox._redraw();
@@ -2640,6 +2672,7 @@ function tRenderAll() {
   tRenderNote();
   renderLandscape();
   loadRelations();
+  loadDigest();
   tRenderTiles();
   tRenderHead();
   tRenderRows();
@@ -2726,6 +2759,93 @@ function markChanges(before, after) {
     tState.flash = null;
     if (tState.data) tRenderRows();
   }, FLASH_MS);
+}
+
+/* ------------------------------------------------------------------ digest */
+async function loadDigest() {
+  const host = document.getElementById("digest");
+  try {
+    const qs = new URLSearchParams({ language: tState.lang,
+                                     include_seen: tState.showSeen ? "1" : "0" });
+    tState.digest = await fetchJSON("/api/digest?" + qs);
+  } catch (e) {
+    host.hidden = false;
+    host.replaceChildren(el("div", "chart-note", "digest unavailable: " + e.message));
+    return;
+  }
+  renderDigest();
+}
+
+function coverageChip(cov) {
+  if (!cov || cov.expected == null) return null;
+  const pct = Math.round(cov.pct * 100);
+  const chip = el("span", "cov " + (pct >= 90 ? "ok" : pct >= 60 ? "warn" : "bad"),
+                  `${pct}% of hourly sweeps landed`);
+  chip.title = `${cov.actual} of ~${cov.expected} scheduled sweeps in the last week`
+    + ` \u00b7 largest gap ${cov.largest_gap_h}h`
+    + (cov.largest_gap_h >= 3 ? " \u00b7 the machine sleeps; see README" : "");
+  return chip;
+}
+
+function renderDigest() {
+  const host = document.getElementById("digest");
+  const d = tState.digest;
+  if (!d) return;
+  host.hidden = false;
+  host.replaceChildren();
+
+  const head = el("div", "dh");
+  const h2 = el("h2", null, d.items.length
+    ? `${d.items.length} worth a look` : "nothing stands out right now");
+  head.appendChild(h2);
+  head.appendChild(el("span", "sub",
+    `of ${d.considered} on the boards \u00b7 ${d.skipped_giants} giants`
+    + (d.skipped_seen ? ` and ${d.skipped_seen} seen` : "") + " skipped"));
+  const chip = coverageChip(d.coverage);
+  if (chip) head.appendChild(chip);
+  head.appendChild(el("span", "spacer"));
+  const toggle = el("button", "ghost seen-btn",
+                    tState.showSeen ? "hide seen" : "show seen");
+  toggle.onclick = () => { tState.showSeen = !tState.showSeen; loadDigest(); };
+  head.appendChild(toggle);
+  host.appendChild(head);
+
+  if (!d.items.length) return;
+  const ol = el("ol");
+  d.items.forEach((it, i) => {
+    const li = el("li");
+    li.setAttribute("aria-selected", tState.selected === it.full_name ? "true" : "false");
+    li.onclick = () => pickRepo(it.full_name);
+    li.appendChild(el("span", "num", String(i + 1)));
+
+    const body = el("div");
+    const line = el("div");
+    line.appendChild(repoLink(it.full_name, it.url));
+    line.appendChild(el("span", "meta",
+      compact(it.stars) + "\u2605" + (it.language ? " \u00b7 " + it.language : "")));
+    body.appendChild(line);
+    const why = el("div", "why");
+    for (const r of it.reasons) {
+      const gold = /^(small, surging|small and|surging and)/.test(r);
+      why.appendChild(el("span", gold ? "gold" : null, r));
+    }
+    body.appendChild(why);
+    li.appendChild(body);
+
+    const isSeen = d.seen && d.seen[it.full_name];
+    const btn = el("button", "ghost seen-btn", isSeen ? "unsee" : "seen");
+    btn.title = isSeen ? "put it back in the digest"
+                       : "mark reviewed; the digest moves on to something new";
+    btn.onclick = async ev => {
+      ev.stopPropagation();
+      const qs = new URLSearchParams({ name: it.full_name, undo: isSeen ? "1" : "0" });
+      try { await fetch("/api/seen?" + qs, { method: "POST" }); } catch (e) { /* refetch shows truth */ }
+      loadDigest();
+    };
+    li.appendChild(btn);
+    ol.appendChild(li);
+  });
+  host.appendChild(ol);
 }
 
 /* ------------------------------------------------------------- fetch button */

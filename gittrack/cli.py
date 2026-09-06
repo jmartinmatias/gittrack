@@ -12,7 +12,8 @@ from pathlib import Path
 from rich.console import Console
 
 from . import config as cfgmod
-from . import db, ingest, report
+from . import db, ingest, notify, report
+from . import digest as dg
 from . import metrics as mx
 from . import trending as tr
 from .github import GitHubClient, GitHubError, resolve_token
@@ -172,6 +173,18 @@ def cmd_run(args) -> int:
                 if n_acc and not lang:
                     console.print(f"[green]acceleration[/green] recorded for "
                                   f"{n_acc} repos")
+            # The point of the sweep: tell the user if something new surfaced.
+            d = dg.build(conn, over=cfg.digest.over_days * 86400,
+                         limit=cfg.digest.limit, max_stars=cfg.digest.max_stars)
+            fresh = dg.new_entrants(conn, "", d["items"])
+            if fresh and not args.no_notify:
+                sent = notify.send(cfg, fresh, f"{len(fresh)} new in the gittrack digest")
+                console.print(f"[green]digest[/green] {len(fresh)} new entrant(s): "
+                              + ", ".join(f["full_name"] for f in fresh)
+                              + f"  [dim](notified via "
+                              f"{', '.join(k for k, v in sent.items() if v) or 'nothing'})[/dim]")
+            elif fresh:
+                console.print(f"[green]digest[/green] {len(fresh)} new entrant(s)")
 
     results = ingest.analyze(conn, cfg)
     n = ingest.record_signals(conn, results, cfg, ts=ts)
@@ -267,6 +280,48 @@ def cmd_trending(args) -> int:
                 console.print(f"[green]+{res['repos_added']}[/green] new repo(s) "
                               f"added to the tracked universe")
     return rc
+
+
+def cmd_digest(args) -> int:
+    cfg, conn = _open(args)
+    d = dg.build(conn, language=args.language or "",
+                 over=cfg.digest.over_days * 86400,
+                 limit=args.limit or cfg.digest.limit,
+                 max_stars=cfg.digest.max_stars,
+                 include_seen=args.include_seen)
+    if args.json:
+        print(json.dumps(d, indent=2, default=float))
+        return 0
+    report.render_digest(d, console=console)
+    if args.notify:
+        fresh = dg.new_entrants(conn, d["language"], d["items"])
+        if fresh:
+            sent = notify.send(cfg, fresh, f"{len(fresh)} new in the gittrack digest")
+            console.print(f"[dim]notified: {', '.join(k for k, v in sent.items() if v) or 'nothing configured'}[/dim]")
+        else:
+            console.print("[dim]nothing new since the last digest; no notification sent[/dim]")
+    return 0
+
+
+def cmd_seen(args) -> int:
+    _cfg, conn = _open(args)
+    if args.list or not args.repos:
+        rows = conn.execute("SELECT * FROM seen ORDER BY ts DESC").fetchall()
+        if not rows:
+            console.print("[dim]nothing marked seen yet[/dim]")
+        for r in rows:
+            console.print(f"  {r['full_name']}  [dim]{ingest.iso(r['ts'])}"
+                          + (f"  {r['note']}" if r["note"] else "") + "[/dim]")
+        return 0
+    for name in args.repos:
+        if args.undo:
+            n = db.unmark_seen(conn, name)
+            console.print(f"[green]unmarked[/green] {name}" if n else f"[dim]{name} was not marked[/dim]")
+        else:
+            db.mark_seen(conn, name, note=args.note)
+            console.print(f"[green]seen[/green] {name}")
+    conn.commit()
+    return 0
 
 
 def cmd_show(args) -> int:
@@ -400,6 +455,15 @@ def cmd_status(args) -> int:
     console.print(f"[bold]trending[/bold]      {s['trending_readings']} reading(s), "
                   f"{s['trending_repos']} distinct repos seen")
 
+    cov = db.run_coverage(conn, "trending", 3600)
+    if cov["expected"]:
+        style = "green" if cov["pct"] >= 0.9 else "yellow" if cov["pct"] >= 0.6 else "red"
+        console.print(f"[bold]coverage[/bold]      [{style}]{cov['actual']} of ~{cov['expected']} "
+                      f"hourly sweeps landed ({cov['pct'] * 100:.0f}%)[/{style}]  "
+                      f"largest gap {cov['largest_gap_h']}h"
+                      + ("  [dim]- the machine sleeps; see README[/dim]"
+                         if cov["largest_gap_h"] >= 3 else ""))
+
     for kind in ("discover", "snapshot", "trending"):
         r = db.last_successful_run(conn, kind)
         if r:
@@ -475,7 +539,26 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--trending-only", action="store_true",
                    help="snapshot the trending boards only; skip the API pass "
                         "entirely (costs no rate-limit quota)")
+    s.add_argument("--no-notify", action="store_true",
+                   help="do not send notifications for new digest entrants")
     s.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("digest", help="what deserves attention right now, and why")
+    s.add_argument("--limit", type=int)
+    s.add_argument("--language", help='a language board; "" (default) is all')
+    s.add_argument("--include-seen", action="store_true",
+                   help="include repos already marked seen")
+    s.add_argument("--notify", action="store_true",
+                   help="notify about entrants new since the last digest")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_digest)
+
+    s = sub.add_parser("seen", help="mark repos as reviewed so the digest moves on")
+    s.add_argument("repos", nargs="*", metavar="owner/name")
+    s.add_argument("--note", help="why, for your future self")
+    s.add_argument("--undo", action="store_true", help="unmark instead")
+    s.add_argument("--list", action="store_true")
+    s.set_defaults(func=cmd_seen)
 
     s = sub.add_parser("trending", help="read GitHub Trending and diff it against "
                                         "the last reading (no API quota)")
