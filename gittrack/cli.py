@@ -123,6 +123,12 @@ def cmd_run(args) -> int:
             except GitHubError as exc:
                 snapshot_error = exc
 
+    if res is not None and cfg.universe.untrack_after_days > 0:
+        pruned = db.prune_stale(conn, cfg.universe.untrack_after_days)
+        conn.commit()
+        if pruned:
+            console.print(f"[green]pruned[/green] {len(pruned)} repo(s) no board has "
+                          f"listed for {cfg.universe.untrack_after_days:g}d")
     if res is not None:
         console.print(
             f"[green]{'discover' if res['discover'] else 'snapshot'}[/green]  "
@@ -493,6 +499,24 @@ def cmd_status(args) -> int:
     return 0
 
 
+def cmd_prune(args) -> int:
+    cfg, conn = _open(args)
+    days = args.days if args.days is not None else cfg.universe.untrack_after_days
+    if days <= 0:
+        console.print("[dim]pruning is disabled (untrack_after_days = 0)[/dim]")
+        return 0
+    names = db.prune_stale(conn, days, dry_run=args.dry_run)
+    conn.commit()
+    verb = "would untrack" if args.dry_run else "untracked"
+    console.print(f"[green]{verb}[/green] {len(names)} repo(s) no board has listed "
+                  f"for {days:g} days [dim](history kept)[/dim]")
+    for n in names[:20]:
+        console.print(f"  {n}")
+    if len(names) > 20:
+        console.print(f"  [dim]... and {len(names) - 20} more[/dim]")
+    return 0
+
+
 def cmd_compact(args) -> int:
     _cfg, conn = _open(args)
     before = db.stats(conn)["snapshots"]
@@ -616,6 +640,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("status", help="database, coverage and run health")
     s.add_argument("--rate-limit", action="store_true", help="also query the API rate limit")
     s.set_defaults(func=cmd_status)
+
+    s = sub.add_parser("prune", help="untrack trending-sourced repos no board has "
+                                     "listed recently (history kept)")
+    s.add_argument("--days", type=float, help="default from config")
+    s.add_argument("--dry-run", action="store_true")
+    s.set_defaults(func=cmd_prune)
 
     s = sub.add_parser("compact", help="downsample old snapshots to one per day")
     s.add_argument("--keep-days", type=float, default=30.0)

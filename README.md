@@ -253,6 +253,7 @@ gittrack serve         # dashboard on http://127.0.0.1:8787
 | `gittrack watch add\|rm\|list` | Repos tracked regardless of rank. Mirrored back into the config file. |
 | `gittrack backfill owner/repo` | Reconstruct real star history immediately (see below). |
 | `gittrack status --rate-limit` | Coverage, run health, remaining API quota. |
+| `gittrack prune [--days N] [--dry-run]` | Untrack trending-sourced repos no board has listed recently. History kept. |
 | `gittrack compact --keep-days 30` | Downsample old snapshots to one per day. |
 | `gittrack serve` | The dashboard. |
 
@@ -631,6 +632,57 @@ mid-tail projects, a genuine breakout, a star-only pump, a young compounder, and
 an old spike that must *not* score as hot today. Repo names there are fictional
 on purpose: attaching invented numbers to real projects would produce a
 screenshot that lies.
+
+## Keeping it running
+
+Two things degrade the value of a tracker silently: readings that never happen,
+and a universe that grows until every pass is spent re-fetching repos nobody
+cares about. Both are addressed, and `coverage` tells you which one you have.
+
+### The machine sleeps
+
+A MacBook that sleeps overnight fires none of its scheduled sweeps. On the
+development machine this cost **~40% of hourly readings**, with 8-10 hour holes,
+and nothing looked wrong until `coverage` was added. The velocity maths survives
+gaps by design (windows interpolate, nothing extrapolates), but a trending
+reading that did not happen cannot be reconstructed - you will never know what
+was on the 3am board.
+
+Three fixes, in increasing order of robustness:
+
+| Fix | How | Trade-off |
+|---|---|---|
+| Keep the laptop awake on mains | `GITTRACK_KEEP_AWAKE=1 ./scripts/launchd/install.sh` | Installs a `caffeinate -s` agent. No sudo. Does nothing on battery, so the lid-closed-in-a-bag case still drops readings. |
+| Always-on Mac (a mini, an old laptop) | Clone, `gh auth login`, run `install.sh` there | The right answer if you have one. The database is per-machine; start fresh there rather than copying. |
+| Cheap VPS or a Pi with cron | `0 * * * * gittrack run --trending-only` | Trending needs no API token at all, so the only credential a collector needs is none. |
+
+Whichever you pick, `gittrack status` reports coverage over the last week; if it
+reads 90%+ you are fine.
+
+### The universe grows without bound
+
+Every board sweep adds the repos it sees. On the development machine that was
++112, +381 and +72 repos on three consecutive days. Nothing ever left, so the
+enrich pass spent more of every run re-fetching repos no board had listed for a
+week.
+
+`prune` untracks **trending-sourced** repos that no board has listed for
+`untrack_after_days` (default 14). Only those: the top-N set is refreshed by
+every discovery pass and the watchlist is explicit, so both already have a way
+out. A repo that arrived via a board and has not been on one for two weeks was
+an afternoon, not a trend. History is kept - `tracked` flips to 0, nothing is
+deleted - so if it comes back its series resumes with a gap rather than
+restarting.
+
+It runs automatically inside the API pass (the 6-hourly enrich agent), and by
+hand:
+
+```bash
+gittrack prune --dry-run          # what would go
+gittrack prune --days 7
+```
+
+Set `untrack_after_days = 0` to disable.
 
 ## Where to take it next
 

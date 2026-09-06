@@ -20,6 +20,11 @@ PORT="${GITTRACK_PORT:-8787}"
 #                       rarely and catches up over several passes.
 INTERVAL="${GITTRACK_INTERVAL:-3600}"
 ENRICH_INTERVAL="${GITTRACK_ENRICH_INTERVAL:-21600}"
+# Set GITTRACK_KEEP_AWAKE=1 to also install an agent that stops the machine
+# sleeping while on mains power (caffeinate -s; no sudo). A laptop that sleeps
+# overnight silently drops ~40% of hourly readings. Off by default because it
+# is a power-policy choice, not a gittrack one.
+KEEP_AWAKE="${GITTRACK_KEEP_AWAKE:-0}"
 
 [ -x "$BIN" ] || { echo "error: $BIN not found. Run: uv venv && uv pip install -e ." >&2; exit 1; }
 mkdir -p "$AGENTS"
@@ -72,7 +77,18 @@ EXTRA='  <key>KeepAlive</key><true/>
   <key>RunAtLoad</key><true/>'
 write_plist com.gittrack.dashboard "$BIN" serve --no-browser --port "$PORT" >/dev/null
 
-for label in com.gittrack.ingest com.gittrack.enrich com.gittrack.dashboard; do
+if [ "$KEEP_AWAKE" = "1" ]; then
+  EXTRA='  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>'
+  write_plist com.gittrack.awake /usr/bin/caffeinate -s >/dev/null
+  AGENTS_TO_LOAD="com.gittrack.ingest com.gittrack.enrich com.gittrack.dashboard com.gittrack.awake"
+else
+  launchctl bootout "gui/$UID/com.gittrack.awake" 2>/dev/null || true
+  rm -f "$AGENTS/com.gittrack.awake.plist"
+  AGENTS_TO_LOAD="com.gittrack.ingest com.gittrack.enrich com.gittrack.dashboard"
+fi
+
+for label in $AGENTS_TO_LOAD; do
   launchctl bootout "gui/$UID/$label" 2>/dev/null || true
   launchctl bootstrap "gui/$UID" "$AGENTS/$label.plist"
   echo "loaded $label"
@@ -82,3 +98,4 @@ echo
 echo "ingest    trending boards every ${INTERVAL}s      -> $ROOT/ingest.log"
 echo "enrich    API pass every ${ENRICH_INTERVAL}s          -> $ROOT/enrich.log"
 echo "dashboard http://127.0.0.1:$PORT             -> $ROOT/dashboard.log"
+[ "$KEEP_AWAKE" = "1" ] && echo "awake     caffeinate -s while on mains power (GITTRACK_KEEP_AWAKE=1)"

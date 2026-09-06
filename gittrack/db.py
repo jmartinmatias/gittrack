@@ -673,6 +673,36 @@ def run_coverage(conn: sqlite3.Connection, kind: str, interval_s: float,
     }
 
 
+# ------------------------------------------------------------------- pruning
+
+
+def prune_stale(conn: sqlite3.Connection, days: float, now: int | None = None,
+                dry_run: bool = False) -> list[str]:
+    """Untrack trending-sourced repos no board has listed for `days`.
+
+    Only repos that reached us *through a board* are candidates: the top-N set
+    is refreshed by every discovery pass and the watchlist is explicit, so both
+    already have a mechanism for leaving. A repo that arrived via trending and
+    has not been on any board for two weeks was an afternoon, not a trend, and
+    keeping it costs an API call on every enrich pass forever.
+
+    History is kept: tracked is set to 0, nothing is deleted.
+    """
+    now = now or int(time.time())
+    cutoff = now - days * 86400
+    rows = conn.execute(
+        """
+        SELECT r.full_name, r.id FROM repos r
+        WHERE r.tracked = 1 AND r.source = 'trending'
+          AND COALESCE((SELECT MAX(ts) FROM trending t WHERE t.repo_id = r.id), 0) < ?
+        ORDER BY r.full_name
+        """, (cutoff,)).fetchall()
+    names = [r["full_name"] for r in rows]
+    if names and not dry_run:
+        set_tracked(conn, [r["id"] for r in rows], False)
+    return names
+
+
 def stats(conn: sqlite3.Connection) -> dict:
     row = conn.execute(
         "SELECT COUNT(*) AS n_snap, MIN(ts) AS first_ts, MAX(ts) AS last_ts FROM snapshots"

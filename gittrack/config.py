@@ -42,6 +42,9 @@ class UniverseConfig:
     # have dropped out of the top N). The bulk search path is unaffected. Repos
     # are rotated least-recently-snapshotted first, so nothing starves.
     max_straggler_fetches: int = 200
+    # Untrack trending-sourced repos no board has listed for this many days.
+    # 0 disables. History is kept; only `tracked` flips.
+    untrack_after_days: float = 14.0
 
 
 @dataclass
@@ -199,6 +202,9 @@ discover_every_hours = 24.0
 # Per-run cap on individually-fetched repos (those the bulk search no longer
 # returns). Raise once authenticated; 200/run is safe on any budget.
 max_straggler_fetches = 200
+# Untrack trending-sourced repos no board has listed for this many days.
+# The universe otherwise grows without bound. 0 disables; history is kept.
+untrack_after_days = 14.0
 
 [trending]
 # GitHub Trending costs no API quota and surfaces repos you are not yet
