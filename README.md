@@ -73,22 +73,60 @@ gittrack digest --include-seen
 gittrack digest --json                            # for piping anywhere
 ```
 
+### Does it actually work? The scorecard
+
+A tool that picks things has to be checkable against what happened next, or it
+is only ever claiming to work. Every digest is logged, and `scorecard` measures
+each pick that is old enough: how much did it grow over the next 24 hours, and
+did that beat the median growth of every tracked repo over the same window?
+
+```
+$ gittrack scorecard
+
+5 of 7 picks outgrew the board over the next 24h  (71% hit rate)
+  median pick growth +9.4%  vs board median +1.1%
+```
+
+The same figure sits in the digest header on the dashboard as *track record*.
+Picks too young to judge are reported as pending, never counted either way, and
+on a fresh install it says so: *no picks are 24h old yet*. If the hit rate
+settles near 50%, the digest is no better than chance and you should say so to
+whoever you showed it to. That is the point of having the number.
+
 ### Being told, instead of checking
 
-"Before anybody" is a property of being *told*, not of having a dashboard. Every
-hourly sweep rebuilds the digest and compares it with the last one; repos that
-newly entered trigger a notification. Two channels to start:
+"Before anybody" is a property of being *told*, not of having a dashboard. Two
+schedules and five channels, all optional and all fire-and-forget: a failed
+notification never fails the sweep that produced it.
 
 ```toml
 [notify]
-macos = true          # macOS notification centre
-slack_webhook = ""    # an incoming-webhook URL; empty disables
-on_new_only = true
+hourly = true         # ping on each sweep for repos newly in the digest
+daily_hour = 8        # one full digest a day at 08:00 local; -1 disables
+
+macos = true          # notification centre (easily missed on a sleeping laptop)
+slack_webhook = ""    # Slack incoming webhook
+ntfy = ""             # "https://ntfy.sh/your-topic": free push to your phone,
+                      #   no account - install the ntfy app and subscribe
+webhook = ""          # any URL; receives JSON {"title","text","items"}
+smtp_host = ""        # email: set host, from and to; the password is read from
+smtp_user = ""        #   the environment variable named below, never the file
+smtp_password_env = "GITTRACK_SMTP_PASSWORD"
+email_from = ""
+email_to = ""
 ```
 
-A failed notification never fails the sweep that produced it. Turn it off for a
-single run with `gittrack run --no-notify`, or fire one by hand with
-`gittrack digest --notify`.
+If you set up exactly one thing, make it **ntfy**: it is the only channel here
+that reaches you when the laptop lid is closed. `gittrack status` lists which
+channels are live. `gittrack run --no-notify` silences a single run;
+`gittrack digest --notify` fires one by hand.
+
+### Found one - now what?
+
+Each digest entry has two buttons. **seen** marks it reviewed so the digest moves
+on. **watch** pins it to the watchlist: it is fetched on every API pass, kept
+through pruning, and never falls out of the universe however long it stays off
+the boards. From the terminal, `gittrack watch add owner/name`.
 
 ### Coverage: knowing when the data is thin
 
@@ -245,6 +283,7 @@ gittrack serve         # dashboard on http://127.0.0.1:8787
 | Command | What it does |
 |---|---|
 | `gittrack digest` | The shortlist: what deserves attention right now, and why. `--json`, `--notify`, `--include-seen` |
+| `gittrack scorecard` | Did the digest's picks outgrow the board over the next 24h? `--horizon`, `--json` |
 | `gittrack seen owner/name` | Mark a repo reviewed so the digest moves on. `--note`, `--undo`, `--list` |
 | `gittrack run` | Discover + snapshot + trending sweep + digest + notify. This is what cron calls. |
 | `gittrack top` | The leaderboard. `--by heat\|z\|velocity\|rel-velocity\|accel\|stars`, `--window`, `--min-stars`, `--max-stars`, `--language`, `--max-age-days`, `--min-z`, `--spark`, `--json`, `--csv` |

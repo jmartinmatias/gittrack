@@ -172,3 +172,95 @@ def test_coverage_ignores_failed_runs(conn):
         rid = db.start_run(conn, "trending", now=now - (4 - h) * 3600)
         db.finish_run(conn, rid, error="boom" if h == 1 else None)
     assert db.run_coverage(conn, "trending", 3600, now=now)["actual"] == 3
+
+
+# ---------------------------------------------------------------- scorecard
+
+
+def _repo_with_series(conn, rid, name, points, source="trending"):
+    """points: [(ts, stars)] - a snapshot series for one repo."""
+    db.upsert_repo(conn, repo(rid, name, points[-1][1], 10), source=source)
+    for ts, stars in points:
+        db.insert_snapshot(conn, rid, ts, stars, 10)
+
+
+def test_scorecard_scores_a_pick_that_beat_the_board(conn):
+    t0 = 1_000_000
+    # The pick doubles over 24h; five other repos barely move.
+    _repo_with_series(conn, 1, "pick/one", [(t0 - 3600, 1000), (t0, 1000), (t0 + 86400, 2000)])
+    for i in range(2, 7):
+        _repo_with_series(conn, i, f"flat/{i}", [(t0 - 3600, 1000), (t0, 1000), (t0 + 86400, 1010)])
+    db.log_digest(conn, t0, "", [{"full_name": "pick/one", "weight": 3,
+                                  "reasons": ["small and surging"], "stars": 1000}])
+    conn.commit()
+    sc = dg.scorecard(conn, now=t0 + 86400 + 60)
+    assert sc["evaluated"] == 1 and sc["hits"] == 1 and sc["hit_rate"] == 1.0
+    assert sc["picks"][0]["growth"] == pytest.approx(1.0)
+    assert sc["picks"][0]["baseline"] == pytest.approx(0.01, abs=1e-3)
+
+
+def test_scorecard_marks_a_pick_that_lagged_the_board_as_a_miss(conn):
+    t0 = 1_000_000
+    _repo_with_series(conn, 1, "pick/one", [(t0, 1000), (t0 + 86400, 1005)])
+    for i in range(2, 7):
+        _repo_with_series(conn, i, f"fast/{i}", [(t0, 1000), (t0 + 86400, 1200)])
+    db.log_digest(conn, t0, "", [{"full_name": "pick/one", "weight": 2,
+                                  "reasons": ["x"], "stars": 1000}])
+    conn.commit()
+    sc = dg.scorecard(conn, now=t0 + 86400 + 60)
+    assert sc["evaluated"] == 1 and sc["hits"] == 0 and sc["hit_rate"] == 0.0
+
+
+def test_scorecard_does_not_judge_picks_that_are_too_young(conn):
+    """A pick made an hour ago has no verdict; it must not count either way."""
+    t0 = 1_000_000
+    _repo_with_series(conn, 1, "pick/one", [(t0, 1000), (t0 + 3600, 1100)])
+    db.log_digest(conn, t0, "", [{"full_name": "pick/one", "weight": 2,
+                                  "reasons": ["x"], "stars": 1000}])
+    conn.commit()
+    sc = dg.scorecard(conn, now=t0 + 7200)
+    assert sc["evaluated"] == 0 and sc["hit_rate"] is None
+
+
+def test_scorecard_needs_a_baseline_of_several_repos(conn):
+    """One repo cannot be its own board; with too few peers there is no verdict."""
+    t0 = 1_000_000
+    _repo_with_series(conn, 1, "pick/one", [(t0, 1000), (t0 + 86400, 2000)])
+    db.log_digest(conn, t0, "", [{"full_name": "pick/one", "weight": 2,
+                                  "reasons": ["x"], "stars": 1000}])
+    conn.commit()
+    sc = dg.scorecard(conn, now=t0 + 86400 + 60)
+    assert sc["evaluated"] == 0 and sc["pending"] == 1
+
+
+def test_digest_log_round_trip_and_idempotence(conn):
+    items = [{"full_name": "a/one", "weight": 3, "reasons": ["r"], "stars": 5}]
+    db.log_digest(conn, 1000, "", items)
+    db.log_digest(conn, 1000, "", items)        # same digest twice: one row
+    db.log_digest(conn, 2000, "rust", items)
+    conn.commit()
+    assert len(db.digest_picks(conn, "")) == 1
+    assert len(db.digest_picks(conn, "rust")) == 1
+    assert db.digest_picks(conn, "", before_ts=999) == []
+
+
+def test_new_entrants_also_logs_the_digest(conn):
+    dg.new_entrants(conn, "", [{"full_name": "a/one", "weight": 1, "reasons": ["r"]}])
+    assert len(db.digest_picks(conn, "")) == 1
+
+
+# ------------------------------------------------------------------- watch
+
+
+def test_pin_to_watchlist_flips_provenance_and_survives_pruning(conn):
+    now = int(time.time())
+    db.upsert_repo(conn, repo(1, "a/one", 100, 10), source="trending", now=now)
+    conn.commit()
+    assert db.pin_to_watchlist(conn, "A/ONE") is True     # case-insensitive
+    assert db.repo_by_name(conn, "a/one")["source"] == "watchlist"
+    # A watchlist repo is never a prune candidate, however stale.
+    assert db.prune_stale(conn, days=0.0001, now=now + 86400) == []
+
+
+def test_pin_unknown_repo_reports_false(conn):
+    assert db.pin_to_watchlist(conn, "nobody/nothing") is False

@@ -256,6 +256,9 @@ def _digest(cfg: Config, language: str, include_seen: bool) -> dict:
         d["coverage"] = db.run_coverage(conn, "trending", 3600)
         d["seen"] = {k: {"ts": v["ts"], "note": v["note"]}
                      for k, v in db.seen_map(conn).items()}
+        d["watching"] = [r["full_name"] for r in conn.execute(
+            "SELECT full_name FROM repos WHERE source = 'watchlist' AND tracked = 1")]
+        d["scorecard"] = dg.scorecard(conn, language)
         return d
     finally:
         conn.close()
@@ -487,6 +490,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(_overview(self.cfg, num("window", self.cfg.metrics.default_window_days)))
             elif u.path == "/api/fetch/status":
                 self._json(_job_snapshot())
+            elif u.path == "/api/scorecard":
+                conn = db.connect(self.cfg.db_path)
+                try:
+                    self._json(dg.scorecard(conn, (q.get("language") or [""])[0],
+                                            horizon=num("horizon", 24) * 3600))
+                finally:
+                    conn.close()
             elif u.path == "/api/digest":
                 self._json(_digest(self.cfg,
                                    language=(q.get("language") or [""])[0],
@@ -567,6 +577,20 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
             self._json({"ok": True, "name": name})
+            return
+        if u.path == "/api/watch":
+            # Pin to the watchlist: never pruned, always fetched. A write, hence POST.
+            name = (q.get("name") or [""])[0]
+            if not name:
+                self._json({"error": "name is required"}, 400)
+                return
+            conn = db.connect(self.cfg.db_path)
+            try:
+                ok = db.pin_to_watchlist(conn, name)
+                conn.commit()
+            finally:
+                conn.close()
+            self._json({"ok": ok, "name": name}, 200 if ok else 404)
             return
         if u.path != "/api/fetch":
             self._json({"error": "not found"}, 404)

@@ -64,12 +64,21 @@ class TrendingConfig:
 
 @dataclass
 class NotifyConfig:
-    # Post a macOS notification when a repo newly enters the digest.
-    macos: bool = True
-    # Slack incoming-webhook URL. Empty disables it.
-    slack_webhook: str = ""
-    # Only notify for repos that were not in the previous digest.
-    on_new_only: bool = True
+    # When: ping on each sweep for repos that newly entered the digest, and/or
+    # one full digest a day at `daily_hour` (local time; -1 disables).
+    hourly: bool = True
+    daily_hour: int = -1
+    # Where. Every channel is fire-and-forget; a failure never fails the sweep.
+    macos: bool = True                 # notification centre (Darwin only)
+    slack_webhook: str = ""            # Slack incoming webhook
+    ntfy: str = ""                     # e.g. https://ntfy.sh/your-topic -> phone push
+    webhook: str = ""                  # any URL; receives {"title","text","items"}
+    smtp_host: str = ""                # email: set host + from + to to enable
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password_env: str = "GITTRACK_SMTP_PASSWORD"   # never the password itself
+    email_from: str = ""
+    email_to: str = ""
 
 
 @dataclass
@@ -222,10 +231,20 @@ limit = 7
 over_days = 7.0
 
 [notify]
-# Tell me when something new enters the digest.
+# When
+hourly = true         # ping on each sweep for repos newly in the digest
+daily_hour = -1       # one full digest a day at this local hour; -1 disables
+# Where (all optional; every channel is fire-and-forget)
 macos = true          # macOS notification centre
-slack_webhook = ""    # an incoming-webhook URL; empty disables
-on_new_only = true    # only for repos not in the previous digest
+slack_webhook = ""    # Slack incoming-webhook URL
+ntfy = ""             # e.g. "https://ntfy.sh/your-topic": free push to your phone
+webhook = ""          # any URL; receives JSON {"title","text","items"}
+smtp_host = ""        # email: set host, from and to; password comes from the env
+smtp_port = 587
+smtp_user = ""
+smtp_password_env = "GITTRACK_SMTP_PASSWORD"
+email_from = ""
+email_to = ""
 
 [metrics]
 default_window_days = 7.0

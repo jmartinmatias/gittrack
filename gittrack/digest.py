@@ -13,7 +13,10 @@ rather than the same names in the same order.
 
 from __future__ import annotations
 
+import statistics
+
 from . import db
+from . import metrics as mx
 from .board import combined_board
 
 # Same thresholds the dashboard draws its golden zones with.
@@ -101,15 +104,89 @@ def build(conn, language: str = "", over: float = 7 * 86400, limit: int = 7,
     }
 
 
+def scorecard(conn, language: str = "", horizon: float = 86400.0,
+              now: int | None = None) -> dict:
+    """Did the digest's picks outgrow the board afterwards?
+
+    This is the only honest answer to "does it work". For every logged pick old
+    enough to have `horizon` seconds of history after it, measure the repo's
+    star growth over that horizon and compare it with the median growth of every
+    tracked repo over the same window. A pick that beat the median is a hit.
+
+    Nothing is evaluated before it is old enough: a pick made an hour ago has no
+    verdict yet, and the scorecard says so rather than counting it either way.
+    """
+    import time as _t
+    now = now or int(_t.time())
+    picks = db.digest_picks(conn, language, before_ts=int(now - horizon))
+    evaluated, pending = [], 0
+
+    # Baseline: median growth of all tracked repos over each pick's window. Cache
+    # by window start so a digest of seven repos costs one baseline, not seven.
+    base_cache: dict[int, float | None] = {}
+
+    def baseline(t0: int) -> float | None:
+        if t0 in base_cache:
+            return base_cache[t0]
+        series = db.load_all_series(conn, since=t0 - 3 * 86400)
+        growths = []
+        for obs in series.values():
+            s_ = mx.Series(obs)
+            a, b = s_.stars_at(t0), s_.stars_at(t0 + horizon)
+            if a and b is not None and a > 0:
+                growths.append((b - a) / a)
+        base_cache[t0] = statistics.median(growths) if len(growths) >= 5 else None
+        return base_cache[t0]
+
+    for pk in picks:
+        rid = pk["repo_id"]
+        if rid is None:
+            continue
+        s_ = mx.Series(db.load_series(conn, rid, since=pk["ts"] - 86400))
+        a, b = s_.stars_at(pk["ts"]), s_.stars_at(pk["ts"] + horizon)
+        if a is None or b is None or a <= 0:
+            pending += 1
+            continue
+        growth = (b - a) / a
+        med = baseline(pk["ts"])
+        if med is None:
+            pending += 1
+            continue
+        evaluated.append({
+            "full_name": pk["full_name"], "picked_at": pk["ts"],
+            "stars_at": int(a), "stars_after": int(b),
+            "growth": round(growth, 4), "baseline": round(med, 4),
+            "hit": growth > med, "weight": pk["weight"],
+        })
+
+    hits = sum(1 for e in evaluated if e["hit"])
+    return {
+        "horizon_h": horizon / 3600,
+        "evaluated": len(evaluated),
+        "pending": pending + sum(1 for pk in picks if pk["repo_id"] is None),
+        "hits": hits,
+        "hit_rate": round(hits / len(evaluated), 3) if evaluated else None,
+        "median_pick_growth": round(statistics.median(e["growth"] for e in evaluated), 4)
+                              if evaluated else None,
+        "median_baseline": round(statistics.median(e["baseline"] for e in evaluated), 4)
+                           if evaluated else None,
+        "best": max(evaluated, key=lambda e: e["growth"]) if evaluated else None,
+        "worst": min(evaluated, key=lambda e: e["growth"]) if evaluated else None,
+        "picks": evaluated[-20:],
+    }
+
+
 def new_entrants(conn, language: str, items: list[dict]) -> list[dict]:
     """Which of these were not in the previous digest - the ones worth a ping.
 
     The previous list is remembered in the meta table under a per-language key,
     so daily and per-language digests do not confuse each other.
     """
+    import time as _t
     key = f"digest_last:{language or 'all'}"
     previous = set(db.get_meta(conn, key, []) or [])
     fresh = [it for it in items if it["full_name"] not in previous]
     db.set_meta(conn, key, [it["full_name"] for it in items])
+    db.log_digest(conn, int(_t.time()), language, items)
     conn.commit()
     return fresh

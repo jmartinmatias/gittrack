@@ -14,7 +14,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -120,6 +120,19 @@ CREATE TABLE IF NOT EXISTS accel (
     PRIMARY KEY (repo_id, ts, language)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_accel_ts ON accel(ts);
+
+-- Every digest ever produced, so the picks can be scored against what
+-- happened next. Without this the tool can only ever claim to work.
+CREATE TABLE IF NOT EXISTS digest_log (
+    ts        INTEGER NOT NULL,
+    language  TEXT    NOT NULL DEFAULT '',
+    full_name TEXT    NOT NULL,
+    weight    INTEGER NOT NULL,
+    reasons   TEXT    NOT NULL,          -- JSON array
+    stars_at  INTEGER,
+    PRIMARY KEY (ts, language, full_name)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_digest_log_ts ON digest_log(ts);
 
 -- Repos the user has looked at. The digest skips these so it keeps surfacing
 -- what is new rather than the same names every morning.
@@ -624,6 +637,38 @@ def unmark_seen(conn: sqlite3.Connection, full_name: str) -> int:
 
 def seen_map(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
     return {r["full_name"]: r for r in conn.execute("SELECT * FROM seen").fetchall()}
+
+
+def log_digest(conn: sqlite3.Connection, ts: int, language: str, items: list[dict]) -> int:
+    conn.executemany(
+        "INSERT OR IGNORE INTO digest_log (ts, language, full_name, weight, reasons, stars_at)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        # Tolerate a partial item: the log must never be the thing that fails a
+        # sweep over a missing optional field.
+        [(ts, language, it["full_name"], int(it.get("weight") or 0),
+          json.dumps(it.get("reasons") or []), it.get("stars")) for it in items])
+    return len(items)
+
+
+def digest_picks(conn: sqlite3.Connection, language: str = "",
+                 before_ts: int | None = None) -> list[sqlite3.Row]:
+    """Logged picks, oldest first, optionally only those made before `before_ts`."""
+    q = ("SELECT d.*, r.id AS repo_id FROM digest_log d"
+         " LEFT JOIN repos r ON r.full_name = d.full_name COLLATE NOCASE"
+         " WHERE d.language = ?")
+    args: list = [language]
+    if before_ts is not None:
+        q += " AND d.ts <= ?"
+        args.append(before_ts)
+    return conn.execute(q + " ORDER BY d.ts", args).fetchall()
+
+
+def pin_to_watchlist(conn: sqlite3.Connection, full_name: str) -> bool:
+    """Make an already-tracked repo a watchlist member: never pruned, always fetched."""
+    cur = conn.execute(
+        "UPDATE repos SET source = 'watchlist', tracked = 1 WHERE full_name = ? COLLATE NOCASE",
+        (full_name,))
+    return cur.rowcount > 0
 
 
 # ---------------------------------------------------------------- meta / memory

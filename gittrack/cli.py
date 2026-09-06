@@ -183,7 +183,7 @@ def cmd_run(args) -> int:
             d = dg.build(conn, over=cfg.digest.over_days * 86400,
                          limit=cfg.digest.limit, max_stars=cfg.digest.max_stars)
             fresh = dg.new_entrants(conn, "", d["items"])
-            if fresh and not args.no_notify:
+            if fresh and cfg.notify.hourly and not args.no_notify:
                 sent = notify.send(cfg, fresh, f"{len(fresh)} new in the gittrack digest")
                 console.print(f"[green]digest[/green] {len(fresh)} new entrant(s): "
                               + ", ".join(f["full_name"] for f in fresh)
@@ -191,6 +191,21 @@ def cmd_run(args) -> int:
                               f"{', '.join(k for k, v in sent.items() if v) or 'nothing'})[/dim]")
             elif fresh:
                 console.print(f"[green]digest[/green] {len(fresh)} new entrant(s)")
+            # One full digest a day at the chosen hour, once, regardless of novelty.
+            # Remembered per calendar day so a sweep that lands late still sends
+            # it and a second sweep that hour does not send it twice.
+            if cfg.notify.daily_hour >= 0 and not args.no_notify and d["items"]:
+                import datetime as _dt
+                now_local = _dt.datetime.now()
+                today = now_local.date().isoformat()
+                if (now_local.hour >= cfg.notify.daily_hour
+                        and db.get_meta(conn, "daily_digest_sent") != today):
+                    sent = notify.send(cfg, d["items"],
+                                       f"gittrack daily digest, {today}")
+                    db.set_meta(conn, "daily_digest_sent", today)
+                    conn.commit()
+                    console.print(f"[green]daily digest[/green] sent via "
+                                  f"{', '.join(k for k, v in sent.items() if v) or 'nothing'}")
 
     results = ingest.analyze(conn, cfg)
     n = ingest.record_signals(conn, results, cfg, ts=ts)
@@ -306,6 +321,16 @@ def cmd_digest(args) -> int:
             console.print(f"[dim]notified: {', '.join(k for k, v in sent.items() if v) or 'nothing configured'}[/dim]")
         else:
             console.print("[dim]nothing new since the last digest; no notification sent[/dim]")
+    return 0
+
+
+def cmd_scorecard(args) -> int:
+    _cfg, conn = _open(args)
+    sc = dg.scorecard(conn, language=args.language or "", horizon=args.horizon * 3600)
+    if args.json:
+        print(json.dumps(sc, indent=2, default=float))
+        return 0
+    report.render_scorecard(sc, console=console)
     return 0
 
 
@@ -461,6 +486,11 @@ def cmd_status(args) -> int:
     console.print(f"[bold]trending[/bold]      {s['trending_readings']} reading(s), "
                   f"{s['trending_repos']} distinct repos seen")
 
+    chans = notify.channels_configured(cfg)
+    console.print("[bold]notify[/bold]        "
+                  + (", ".join(chans) if chans else "[yellow]no channel configured[/yellow]")
+                  + (f"  daily at {cfg.notify.daily_hour:02d}:00" if cfg.notify.daily_hour >= 0 else "")
+                  + ("  hourly on new entrants" if cfg.notify.hourly else ""))
     cov = db.run_coverage(conn, "trending", 3600)
     if cov["expected"]:
         style = "green" if cov["pct"] >= 0.9 else "yellow" if cov["pct"] >= 0.6 else "red"
@@ -576,6 +606,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="notify about entrants new since the last digest")
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_digest)
+
+    s = sub.add_parser("scorecard", help="did the digest's picks outgrow the board "
+                                         "afterwards? the only honest test")
+    s.add_argument("--horizon", type=float, default=24.0, metavar="HOURS",
+                   help="how long after a pick to measure (default 24)")
+    s.add_argument("--language", help='language board; "" (default) is all')
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_scorecard)
 
     s = sub.add_parser("seen", help="mark repos as reviewed so the digest moves on")
     s.add_argument("repos", nargs="*", metavar="owner/name")

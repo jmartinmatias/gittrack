@@ -451,3 +451,12 @@
    metric, every table column, and the thinner relationship panels. */
 #t-more { font-size: 12px; color: var(--text-muted); }
 #t-more[aria-pressed="true"] { color: var(--series-1); }
+
+/* Scorecard: the digest's track record, right where the picks are made. */
+.score { font-size: 11.5px; padding: 1px 8px; border-radius: 999px;
+         border: 1px solid currentColor; font-variant-numeric: tabular-nums; }
+.score.ok { color: var(--good); } .score.mid { color: var(--warning); }
+.score.bad { color: var(--critical); } .score.none { color: var(--text-muted); }
+.digest .acts { display: flex; gap: 2px; align-items: start; }
+.digest .watch-btn { font-size: 11px; padding: 3px 8px; color: var(--text-secondary); }
+.digest .watch-btn[aria-pressed="true"] { color: var(--series-1); font-weight: 600; }

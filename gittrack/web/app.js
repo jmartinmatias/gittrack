@@ -2235,6 +2235,24 @@ async function loadDigest() {
   renderDigest();
 }
 
+/* The digest's own track record: of the picks old enough to judge, how many
+   outgrew the board's median over the next 24h. Says "no verdict yet" honestly
+   rather than counting unaged picks either way. */
+function scoreChip(sc) {
+  if (!sc || !sc.evaluated) {
+    const c = el("span", "score none", "track record: no picks 24h old yet");
+    c.title = sc && sc.pending ? `${sc.pending} pick(s) waiting to age` : "check back tomorrow";
+    return c;
+  }
+  const rate = Math.round(sc.hit_rate * 100);
+  const c = el("span", "score " + (rate >= 60 ? "ok" : rate >= 45 ? "mid" : "bad"),
+               `track record: ${sc.hits} of ${sc.evaluated} picks beat the board (${rate}%)`);
+  c.title = `median pick growth ${(sc.median_pick_growth * 100).toFixed(1)}% vs board `
+    + `${(sc.median_baseline * 100).toFixed(1)}% over the next ${sc.horizon_h}h`
+    + (sc.pending ? ` \u00b7 ${sc.pending} more waiting to age` : "");
+  return c;
+}
+
 function coverageChip(cov) {
   if (!cov || cov.expected == null) return null;
   const pct = Math.round(cov.pct * 100);
@@ -2262,6 +2280,7 @@ function renderDigest() {
     + (d.skipped_seen ? ` and ${d.skipped_seen} seen` : "") + " skipped"));
   const chip = coverageChip(d.coverage);
   if (chip) head.appendChild(chip);
+  head.appendChild(scoreChip(d.scorecard));
   head.appendChild(el("span", "spacer"));
   const toggle = el("button", "ghost seen-btn",
                     tState.showSeen ? "hide seen" : "show seen");
@@ -2291,6 +2310,21 @@ function renderDigest() {
     body.appendChild(why);
     li.appendChild(body);
 
+    const acts = el("div", "acts");
+    const watching = (d.watching || []).includes(it.full_name);
+    const wbtn = el("button", "ghost watch-btn", watching ? "\u2605 watching" : "watch");
+    wbtn.setAttribute("aria-pressed", String(watching));
+    wbtn.title = watching
+      ? "on your watchlist: never pruned, always fetched"
+      : "pin to the watchlist so it is tracked for good and never pruned";
+    wbtn.onclick = async ev => {
+      ev.stopPropagation();
+      if (watching) return;
+      try { await fetch("/api/watch?" + new URLSearchParams({ name: it.full_name }),
+                        { method: "POST" }); } catch (e) { /* refetch shows truth */ }
+      loadDigest();
+    };
+    acts.appendChild(wbtn);
     const isSeen = d.seen && d.seen[it.full_name];
     const btn = el("button", "ghost seen-btn", isSeen ? "unsee" : "seen");
     btn.title = isSeen ? "put it back in the digest"
@@ -2301,7 +2335,8 @@ function renderDigest() {
       try { await fetch("/api/seen?" + qs, { method: "POST" }); } catch (e) { /* refetch shows truth */ }
       loadDigest();
     };
-    li.appendChild(btn);
+    acts.appendChild(btn);
+    li.appendChild(acts);
     ol.appendChild(li);
   });
   host.appendChild(ol);

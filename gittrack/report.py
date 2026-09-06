@@ -316,6 +316,43 @@ def render_digest(d: dict, console: Console | None = None) -> None:
     console.print("[dim]mark one reviewed with: gittrack seen owner/name[/dim]")
 
 
+def render_scorecard(sc: dict, console: Console | None = None) -> None:
+    """Were the picks right? Growth after the pick versus the board's median."""
+    console = console or Console()
+    console.print()
+    h = sc["horizon_h"]
+    if not sc["evaluated"]:
+        console.print(f"[dim]no picks are {h:g}h old yet"
+                      + (f" ({sc['pending']} waiting to age)" if sc["pending"] else "")
+                      + ". check back tomorrow.[/dim]")
+        return
+    rate = sc["hit_rate"] * 100
+    style = "green" if rate >= 60 else "yellow" if rate >= 45 else "red"
+    console.print(Text(f"{sc['hits']} of {sc['evaluated']} picks outgrew the board "
+                       f"over the next {h:g}h", style="bold"), end="  ")
+    console.print(Text(f"({rate:.0f}% hit rate)", style=style))
+    console.print(f"  median pick growth [bold]{sc['median_pick_growth'] * 100:+.1f}%[/bold]"
+                  f"  vs board median [bold]{sc['median_baseline'] * 100:+.1f}%[/bold]")
+    if sc["pending"]:
+        console.print(f"  [dim]{sc['pending']} more waiting to age[/dim]")
+    console.print()
+    t = Table(header_style="bold", pad_edge=False, padding=(0, 1), expand=False)
+    t.add_column("picked", width=16)
+    t.add_column("repo", min_width=24, overflow="ellipsis")
+    t.add_column("stars", justify="right", width=7)
+    t.add_column(f"+{h:g}h", justify="right", width=8)
+    t.add_column("board", justify="right", width=8)
+    t.add_column("", width=3)
+    for e in sc["picks"][-12:]:
+        t.add_row(
+            datetime.fromtimestamp(e["picked_at"], timezone.utc).strftime("%m-%d %H:%M"),
+            e["full_name"], compact(e["stars_at"]),
+            Text(f"{e['growth'] * 100:+.1f}%", style="green" if e["hit"] else "red"),
+            f"{e['baseline'] * 100:+.1f}%",
+            Text("\u2713" if e["hit"] else "\u2717", style="green" if e["hit"] else "red"))
+    console.print(t)
+
+
 def render_show(m: mx.RepoMetrics, repo_row, series: list, hot_since: int | None,
                 console: Console | None = None) -> None:
     console = console or Console()
