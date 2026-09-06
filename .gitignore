@@ -24,3 +24,8 @@ gittrack.toml
 
 # secrets
 .env
+
+# conversation exports (/export) land in the repo root as dated .txt files and
+# contain the full transcript - tokens, addresses, hostnames. never commit one.
+/20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.txt
+/*.transcript.txt
