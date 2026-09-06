@@ -446,6 +446,16 @@ both being lumped under "up".
 ▲ and ▼ differ in shape, not just colour, so the column survives greyscale and
 any form of colour blindness.
 
+### Simple by default
+
+The trending view opens with the digest, the board switch, the language filter,
+and a seven-column table: rank, direction, repo, stars, period gain, surge,
+boards, score. That is the answer and the evidence for it.
+
+**more** (top right of the filter row) reveals the exploration surface: the
+ranking metric (`surge / stars / forks / both`), every table column, and the
+same-owner and co-movement panels. The choice is remembered per browser.
+
 ### One layout, every board
 
 `combined`, `daily`, `weekly` and `monthly` all render through the same columns

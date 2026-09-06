@@ -454,9 +454,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         # This page renders untrusted repo names/descriptions; the CSP is a second
         # line of defence behind using textContent everywhere in the client.
+        # No inline script remains, so script-src can be 'self'. Styles keep
+        # 'unsafe-inline' because charts set style attributes on generated SVG.
         self.send_header("Content-Security-Policy",
-                         "default-src 'none'; style-src 'unsafe-inline'; "
-                         "script-src 'unsafe-inline'; connect-src 'self'; img-src data:")
+                         "default-src 'none'; style-src 'self' 'unsafe-inline'; "
+                         "script-src 'self'; connect-src 'self'; img-src data:")
         self.end_headers()
         self.wfile.write(body)
 
@@ -476,6 +478,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path in ("/", "/index.html"):
                 self._send((WEB_DIR / "index.html").read_bytes(), "text/html; charset=utf-8")
+            elif u.path == "/app.css":
+                self._send((WEB_DIR / "app.css").read_bytes(), "text/css; charset=utf-8")
+            elif u.path == "/app.js":
+                self._send((WEB_DIR / "app.js").read_bytes(),
+                           "application/javascript; charset=utf-8")
             elif u.path == "/api/overview":
                 self._json(_overview(self.cfg, num("window", self.cfg.metrics.default_window_days)))
             elif u.path == "/api/fetch/status":
