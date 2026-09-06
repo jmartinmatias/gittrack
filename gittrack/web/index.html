@@ -518,10 +518,8 @@
         <span class="seg" id="t-rankby" role="group" aria-label="Ranking metric"></span></span>
       <span class="fgroup"><span class="flabel">language</span>
         <select id="t-lang"><option value="">all</option></select></span>
-      <span class="fgroup"><span class="flabel">movement vs</span>
-        <span class="seg" id="t-compare" role="group" aria-label="Comparison window"></span></span>
-      <span class="fgroup"><span class="flabel">summarise over</span>
-        <span class="seg" id="t-over" role="group" aria-label="Summary window"></span></span>
+      <span class="fgroup"><span class="flabel">period</span>
+        <span class="seg" id="t-period" role="group" aria-label="Period"></span></span>
     </div>
     <section class="digest card" id="digest" hidden></section>
     <div class="note" id="t-note" hidden>
@@ -2048,7 +2046,7 @@ function renderAll() {
 
 /* ---------------------------------------------------------------- trending */
 const tState = {
-  since: "combined", lang: "", compare: "1d", over: "1w", rankBy: "surge",
+  since: "combined", lang: "", period: "1w", rankBy: "surge",
   armDiff: false, flash: null, flashTimer: null, gold: null,
   relations: null, theme: null, themeRepos: null, hoverRepos: null,
   digest: null, showSeen: false,
@@ -2097,7 +2095,7 @@ async function tLoad() {
   try {
     const qs = new URLSearchParams({
       since: tState.since, language: tState.lang,
-      compare: tState.compare, over: tState.over, rank_by: tState.rankBy,
+      compare: tState.period, over: tState.period, rank_by: tState.rankBy,
     });
     // A fetch was requested: remember the board we are about to replace so the
     // arrivals and departures can be shown rather than silently swapped in.
@@ -2142,8 +2140,9 @@ function tRenderFilters() {
      ["combined", "daily", "weekly", "monthly"]);
   mk(document.getElementById("t-rankby"),
      ["surge", "stars", "forks", "both"], "rankBy");
-  mk(document.getElementById("t-compare"), ["1d", "1w", "1m", "3m"], "compare");
-  mk(document.getElementById("t-over"), ["1w", "2w", "1m", "3m"], "over");
+  // One control, two consumers: movement is measured against the reading one
+  // period ago, and the summary window is that same period.
+  mk(document.getElementById("t-period"), ["1d", "1w", "1m", "3m"], "period");
   // Movement and the summary window are per-board concepts; the combined board
   // is a single merged snapshot, so hide the controls that do not apply to it.
   // Address each group through the control it contains, not by position: an
@@ -2156,8 +2155,7 @@ function tRenderFilters() {
     if (g) g.style.display = on ? "" : "none";
   };
   show("t-rankby", combined);    // ranking metric only means something merged
-  show("t-compare", !combined);  // a merged board has no previous reading
-  show("t-over", !combined);     // nor a summary window
+  show("t-period", !combined);   // a merged board has no previous reading
   requestAnimationFrame(syncSticky);
 
   const sel = document.getElementById("t-lang");
@@ -2232,7 +2230,10 @@ function tRenderTiles() {
 }
 
 function tColumns() {
-  return T_COLUMNS_COMBINED;   // one layout for every board
+  const cols = T_COLUMNS_COMBINED;   // one layout for every board
+  const d = tState.data;
+  // Until any repo has fork history, the dforks column is a row of dashes.
+  return (d && d.fork_ready === 0) ? cols.filter(c => c.key !== "fork_rel") : cols;
 }
 
 function tRenderHead() {
@@ -2761,6 +2762,25 @@ function markChanges(before, after) {
   }, FLASH_MS);
 }
 
+/* The velocity view needs a week of snapshots before it has anything to say.
+   Label its tab with how far along that is, so nobody clicks into an empty
+   table wondering whether something is broken. */
+async function labelVelocityTab() {
+  const btn = document.querySelector('#view-seg button[data-view="velocity"]');
+  if (!btn) return;
+  try {
+    const d = await fetchJSON("/api/overview?window=7");
+    const s = d.stats;
+    const ready = d.repos.filter(r => r.has_window).length;
+    if (ready > 0) { btn.textContent = "velocity"; btn.title = `${ready} repos have a 7-day window`; return; }
+    const have = s.first_ts ? (Date.now() / 1000 - s.first_ts) / 86400 : 0;
+    const left = Math.max(0, 7 - have);
+    btn.textContent = `velocity \u00b7 in ${left.toFixed(1)}d`;
+    btn.title = `Needs 7 days of snapshots; ${have.toFixed(1)}d collected so far. `
+      + "Trending works from day one - this is the part that needs history.";
+  } catch (e) { /* the label is a nicety; never block on it */ }
+}
+
 /* ------------------------------------------------------------------ digest */
 async function loadDigest() {
   const host = document.getElementById("digest");
@@ -3009,6 +3029,7 @@ try {
 } catch (e) { /* storage can throw in private mode */ }
 
 setView("trending");   // trends are the point of this page; velocity is the drill-down
+labelVelocityTab();
 setInterval(() => (state.view === "trending" ? tLoad() : load()), 5 * 60 * 1000);
 </script>
 </body>
