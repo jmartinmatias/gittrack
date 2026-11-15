@@ -158,7 +158,7 @@ def test_a_sweep_where_every_board_fails_is_recorded_as_an_error(env, monkeypatc
         raise RuntimeError("network down")
     monkeypatch.setattr(ingest, "refresh_trending", always_fail)
     env.trending_only = True
-    cli.cmd_run(env)
+    assert cli.cmd_run(env) == 1, "a scheduler must see the sweep fail"
 
     conn = db.connect(tmp_path / "t.db")
     assert db.last_successful_run(conn, "trending") is None

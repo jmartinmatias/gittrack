@@ -141,6 +141,7 @@ def cmd_run(args) -> int:
 
     ts = res["ts"] if res is not None else int(time.time())
 
+    sweep_failed = False
     if cfg.trending.enabled and not args.no_trending:
         boards = [(sc, lg) for sc in cfg.trending.since
                   for lg in cfg.trending.languages]
@@ -173,6 +174,7 @@ def cmd_run(args) -> int:
         db.finish_run(conn, sweep_id, repos_seen=rows_seen, snapshots_written=swept,
                       api_requests=0,
                       error=None if swept else "every board failed")
+        sweep_failed = not swept and bool(boards)
         if swept:
             for lang in cfg.trending.languages:
                 n_acc = ingest.record_acceleration(conn, cfg, language=lang, ts=ts)
@@ -218,8 +220,9 @@ def cmd_run(args) -> int:
     elif n:
         console.print(f"[bold yellow]{n} breakout signal(s) recorded.[/bold yellow]")
     # Non-zero so the failure is visible in the log, but only after the trending
-    # half has had its turn.
-    return 1 if snapshot_error is not None else 0
+    # half has had its turn. One bad board is tolerated; every board failing is
+    # a scraper break and must not exit 0.
+    return 1 if snapshot_error is not None or sweep_failed else 0
 
 
 def cmd_top(args) -> int:
