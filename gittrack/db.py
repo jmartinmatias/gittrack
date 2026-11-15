@@ -192,6 +192,14 @@ def upsert_repo(conn: sqlite3.Connection, r: dict, source: str = "top", now: int
     """Insert or refresh repo metadata from a GitHub API repo object."""
     now = now or int(time.time())
     owner = (r.get("owner") or {})
+    # The numeric id is the identity; a name can pass to a new id (a repo
+    # deleted and recreated, or two repos swapping names). Free the name from
+    # the stale row instead of failing the whole sweep on the UNIQUE index. The
+    # old row keeps its history; if its id resurfaces under a new name, the
+    # ON CONFLICT(id) below renames and re-tracks it.
+    conn.execute(
+        "UPDATE repos SET full_name = full_name || ' (id ' || id || ')', tracked = 0"
+        " WHERE full_name = ? AND id != ?", (r["full_name"], r["id"]))
     conn.execute(
         """
         INSERT INTO repos (id, full_name, owner, name, description, language, topics,

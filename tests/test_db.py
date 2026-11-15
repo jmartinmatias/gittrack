@@ -230,3 +230,61 @@ def test_a_richer_source_still_fills_in_what_was_missing(conn):
     assert row["created_at"] is not None
     assert row["language"] == "Rust"
     assert row["source"] == "trending", "provenance must still be sticky"
+
+
+# ------------------------------------------------- name moving to a new id
+
+
+def test_a_recreated_repo_takes_the_name_without_breaking_the_sweep(conn):
+    """Same full_name, new numeric id: this used to raise IntegrityError on the
+    UNIQUE(full_name) index, which aborted the whole snapshot pass every run."""
+    db.upsert_repo(conn, repo_payload(rid=1))
+    db.insert_snapshot(conn, 1, 1000, 100, 10)
+    db.upsert_repo(conn, repo_payload(rid=2))
+    assert db.repo_by_name(conn, "acme/widget")["id"] == 2
+    old = conn.execute("SELECT * FROM repos WHERE id = 1").fetchone()
+    assert old["full_name"] == "acme/widget (id 1)" and old["tracked"] == 0
+    assert db.load_series(conn, 1)[0].stars == 100, "history is kept"
+
+
+def test_two_repos_swapping_names_both_end_up_correct(conn):
+    db.upsert_repo(conn, repo_payload(rid=1, full_name="acme/a"))
+    db.upsert_repo(conn, repo_payload(rid=2, full_name="acme/b"))
+    db.upsert_repo(conn, repo_payload(rid=1, full_name="acme/b"))
+    db.upsert_repo(conn, repo_payload(rid=2, full_name="acme/a"))
+    got = {r["id"]: (r["full_name"], r["tracked"])
+           for r in conn.execute("SELECT * FROM repos")}
+    assert got == {1: ("acme/b", 1), 2: ("acme/a", 1)}
+
+
+# ---------------------------------------------------------------- migration
+
+
+def test_migrate_is_idempotent_and_keeps_data(tmp_path):
+    path = tmp_path / "g.db"
+    c = db.connect(path)
+    db.migrate(c)
+    db.upsert_repo(c, repo_payload())
+    db.insert_snapshot(c, 1, 1000, 100, 10)
+    c.commit()
+    c.close()
+    for _ in range(2):
+        c = db.connect(path)
+        db.migrate(c)
+        assert len(db.load_series(c, 1)) == 1
+        assert db.get_meta(c, "schema_version") == db.SCHEMA_VERSION
+        c.close()
+
+
+def test_migrating_an_old_trending_table_keeps_its_rows():
+    c = db.connect(":memory:")
+    c.execute("""CREATE TABLE trending (
+        ts INTEGER NOT NULL, since TEXT NOT NULL, language TEXT NOT NULL DEFAULT '',
+        rank INTEGER NOT NULL, repo_id INTEGER, full_name TEXT NOT NULL,
+        stars INTEGER, forks INTEGER, period_stars INTEGER,
+        PRIMARY KEY (ts, since, language, full_name)) WITHOUT ROWID""")
+    c.execute("INSERT INTO trending VALUES (1000, 'daily', '', 1, 7, 'a/x', 50, 5, 9)")
+    db.migrate(c)
+    row = db.trending_at(c, 1000, "daily")[0]
+    assert (row["full_name"], row["period_stars"], row["repo_language"]) == ("a/x", 9, None)
+    c.close()
