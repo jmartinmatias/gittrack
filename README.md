@@ -286,7 +286,7 @@ gittrack serve         # dashboard on http://127.0.0.1:8787
 | `gittrack scorecard` | Did the digest's picks outgrow the board over the next 24h? `--horizon`, `--json` |
 | `gittrack seen owner/name` | Mark a repo reviewed so the digest moves on. `--note`, `--undo`, `--list` |
 | `gittrack run` | Discover + snapshot + trending sweep + digest + notify. This is what cron calls. |
-| `gittrack top` | The leaderboard. `--by heat\|z\|velocity\|rel-velocity\|accel\|stars`, `--window`, `--min-stars`, `--max-stars`, `--language`, `--max-age-days`, `--min-z`, `--spark`, `--json`, `--csv` |
+| `gittrack top` | The leaderboard. `--by heat\|z\|velocity\|rel-velocity\|accel\|doubling\|stars\|forks`, `--window`, `--min-stars`, `--max-stars`, `--language`, `--max-age-days`, `--min-z`, `--spark`, `--json`, `--csv` |
 | `gittrack trending` | Read GitHub Trending and diff it against a previous reading. Costs no API quota. |
 | `gittrack show owner/repo` | Every metric for one repo, plus a 30-day sparkline. |
 | `gittrack watch add\|rm\|list` | Repos tracked regardless of rank. Mirrored back into the config file. |
@@ -673,8 +673,14 @@ run `gittrack compact` periodically.
 
 ```bash
 .venv/bin/python -m pytest tests/ -q
+.venv/bin/ruff check gittrack tests scripts     # what CI runs, with the tests
 python scripts/seed_demo.py demo.db && gittrack --db demo.db serve
 ```
+
+The trending parser is tested against `tests/fixtures/trending_daily.html`, a
+saved page, so the suite never touches GitHub. If the live page changes, a
+sweep refuses the board with "the page layout may have changed"; save a fresh
+copy of the page over the fixture and fix the selectors in `trending.py`.
 
 `scripts/seed_demo.py` generates synthetic history - a saturated giant, steady
 mid-tail projects, a genuine breakout, a star-only pump, a young compounder, and
@@ -697,7 +703,7 @@ gaps by design (windows interpolate, nothing extrapolates), but a trending
 reading that did not happen cannot be reconstructed - you will never know what
 was on the 3am board.
 
-Three fixes, in increasing order of robustness:
+Three fixes, in increasing order of reliability:
 
 | Fix | How | Trade-off |
 |---|---|---|
