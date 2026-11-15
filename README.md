@@ -149,7 +149,7 @@ accrete stars on a near-flat line; they are saturated. Their real job here is to
 be the *calibration set* - they define what normal growth looks like, which is
 what makes a z-score mean anything.
 
-The alpha lives in repos with roughly **1,000–20,000 stars**, where a 3× jump in
+The alpha lives in repos with roughly **1,000 to 20,000 stars**, where a 3× jump in
 weekly rate is both real and meaningful.
 
 **How deep does `top_n` have to go to get there?** Measured against the live API
@@ -365,9 +365,9 @@ the repo is climbing).
 
 ![The trending view](docs/trending.jpg)
 
-*(Shown with demo data.)* The dashboard never triggers a scrape - it reads stored
-readings only, so opening the page never depends on network luck and never
-hammers GitHub on refresh. `gittrack run` is what fetches.
+*(Shown with demo data.)* Opening or refreshing the page never scrapes: it reads
+stored readings only, so it never depends on network luck and never hammers
+GitHub. Only **Fetch now** (above) and `gittrack run` fetch.
 
 ### The combined board
 
@@ -412,7 +412,7 @@ to "abnormally gaining traction" as a single number gets.
 
 Two visual channels carry it:
 
-- **Surge bar.** Linear on a 0–100% domain, because the value is already a
+- **Surge bar.** Linear on a 0 to 100% domain, because the value is already a
   percentage of the repo's own total - no scale trickery, a short bar honestly
   means a small share.
 - **Rank trend.** A sparkline of the repo's rank over the period, *inverted* so a
@@ -446,7 +446,7 @@ on a linear scale every small repo collapses onto the left edge - precisely the
 band worth looking at. The shape it draws is the thesis of the whole tool. The
 cloud slopes down and right, because **high surge only ever happens at low star
 counts**: a 250k-star project cannot gain 60% of itself in a week, a 3k-star one
-can. The golden zone is the 1k–20k band **and** surge ≥25%: small and moving
+can. The golden zone is the 1k to 20k band **and** surge ≥25%: small and moving
 hard at once, which is the only combination the whole tool is looking for. Dot
 radius carries how many boards a repo spans.
 
@@ -659,9 +659,9 @@ carried forward.
 
 | Universe | Cost per hourly run | Against 5000/hr |
 |---|---|---|
-| top 100 | ~1–2 calls | negligible |
-| top 1,000 | ~10–15 calls | negligible |
-| top 10,000 | ~100–150 calls | fine |
+| top 100 | ~1 to 2 calls | negligible |
+| top 1,000 | ~10 to 15 calls | negligible |
+| top 10,000 | ~100 to 150 calls | fine |
 
 ## Storage
 
