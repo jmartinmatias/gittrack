@@ -679,9 +679,11 @@ python scripts/seed_demo.py demo.db && gittrack --db demo.db serve
 ```
 
 The trending parser is tested against `tests/fixtures/trending_daily.html`, a
-saved page, so the suite never touches GitHub. If the live page changes, a
-sweep refuses the board with "the page layout may have changed"; save a fresh
-copy of the page over the fixture and fix the selectors in `trending.py`.
+hand-trimmed copy of the page's markup with three fictional repos, so the suite
+never touches GitHub. If the live page changes, a sweep refuses the board with
+"the page layout may have changed"; carry the new markup into the fixture
+(keeping its fictional repos, which the tests pin) and fix the selectors in
+`trending.py`.
 
 `scripts/seed_demo.py` generates synthetic history - a saturated giant, steady
 mid-tail projects, a genuine breakout, a star-only pump, a young compounder, and

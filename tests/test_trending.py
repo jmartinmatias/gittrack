@@ -268,12 +268,13 @@ def test_migration_adds_repo_language_to_a_preexisting_table():
     c.close()
 
 
-# --------------------------------------------------------- saved page fixture
+# ------------------------------------------------------------- page fixture
 #
-# tests/fixtures/trending_daily.html is a three-row Trending page with the real
-# page chrome around it (nav, star buttons, avatars, footer). The markup changing
-# under the regexes is the main way this tool breaks, so these tests pin the
-# fields, then break the page on purpose and check that the break is loud.
+# tests/fixtures/trending_daily.html is a hand-trimmed Trending page: three
+# fictional repos in the page's markup (nav, star buttons, avatars, footer).
+# The markup changing under the regexes is the main way this tool breaks, so
+# these tests pin the fields, then break the page on purpose and check that the
+# break is loud.
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "trending_daily.html").read_text()
 
