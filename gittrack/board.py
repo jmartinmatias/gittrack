@@ -92,7 +92,7 @@ def combined_board(conn, language: str, over: float,
     "trending the most" rather than "trending loudest today".
 
     Positions are normalised by each board's own length because the boards are
-    not the same size (19 / 23 / 20 today), so a raw rank would quietly weight
+    not the same size (19, 23 and 20 rows on one sample day), so a raw rank would quietly weight
     the shortest board highest.
     """
     ranks, sizes, detail, period = {}, {}, {}, {}
