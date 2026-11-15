@@ -174,10 +174,13 @@ def refresh_trending(conn, cfg: Config, since: str = "daily", language: str = ""
 
     if fetch:
         rows = tr.fetch_rows(since=since, language=language)
-        if not rows:
+        problems = tr.layout_problems(rows)
+        if problems:
+            # Refuse rather than store: a board saved with blank counts looks like
+            # a quiet day, and the surge and digest built on it go silently empty.
             raise RuntimeError(
-                f"trending board '{since}' returned no parseable rows - "
-                "the page layout may have changed")
+                f"trending board '{since}/{language or 'all'}': "
+                f"{'; '.join(problems)}. The page layout may have changed")
     else:
         # Offline: treat the newest stored reading as "current".
         latest = db.trending_times(conn, since, language, limit=1)

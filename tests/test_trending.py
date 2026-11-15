@@ -1,11 +1,13 @@
 """Tests for the trending scraper, diff, and streak tracking."""
 
 import time
+from pathlib import Path
 
 import pytest
 
-from gittrack import db
+from gittrack import db, ingest
 from gittrack import trending as tr
+from gittrack.config import Config
 
 DAY = 86400
 
@@ -264,3 +266,99 @@ def test_migration_adds_repo_language_to_a_preexisting_table():
     assert "repo_language" in cols
     db.migrate(c)   # idempotent
     c.close()
+
+
+# --------------------------------------------------------- saved page fixture
+#
+# tests/fixtures/trending_daily.html is a three-row Trending page with the real
+# page chrome around it (nav, star buttons, avatars, footer). The markup changing
+# under the regexes is the main way this tool breaks, so these tests pin the
+# fields, then break the page on purpose and check that the break is loud.
+
+FIXTURE = (Path(__file__).parent / "fixtures" / "trending_daily.html").read_text()
+
+
+def test_fixture_page_parses_every_row_and_field():
+    got = [(r.rank, r.full_name, r.repo_id, r.language, r.stars, r.forks,
+            r.period_stars) for r in tr.parse(FIXTURE)]
+    assert got == [
+        (1, "example-org/rocket-cache", 810001, "Rust", 4210, 187, 1876),
+        (2, "sample-labs/docs-only", 810002, None, 123456, 9870, 312),
+        (3, "solo-dev/tiny", 810003, "Python", 88, 0, 1),
+    ]
+
+
+def test_fixture_descriptions_are_unescaped_and_optional():
+    rows = tr.parse(FIXTURE)
+    assert rows[0].description == "A key-value cache in Rust & nothing else <3"
+    assert rows[2].description is None, "a row without <p> must not borrow one"
+
+
+def test_fixture_page_has_no_layout_problems():
+    assert tr.layout_problems(tr.parse(FIXTURE)) == []
+
+
+@pytest.mark.parametrize("since,phrase", [("weekly", "stars this week"),
+                                          ("monthly", "stars this month")])
+def test_period_counts_parse_on_weekly_and_monthly_boards(since, phrase):
+    singular = phrase.replace("stars", "star")
+    page = FIXTURE.replace("stars today", phrase).replace("star today", singular)
+    assert [r.period_stars for r in tr.parse(page)] == [1876, 312, 1]
+
+
+def test_an_extra_class_on_the_row_tag_does_not_empty_the_board():
+    page = FIXTURE.replace('<article class="Box-row">',
+                           '<article class="Box-row js-new" data-x="1">')
+    assert len(tr.parse(page)) == 3
+
+
+def test_a_renamed_row_class_is_reported_as_a_layout_problem():
+    page = FIXTURE.replace('class="Box-row"', 'class="TrendRow"')
+    rows = tr.parse(page)
+    assert rows == []
+    assert tr.layout_problems(rows) == ["no parseable rows"]
+
+
+def test_a_partial_parse_warns_with_the_count(caplog):
+    page = FIXTURE.replace('href="/solo-dev/tiny" data-view', 'data-view', 1)
+    rows = tr.parse(page)
+    assert [r.full_name for r in rows] == ["example-org/rocket-cache",
+                                           "sample-labs/docs-only"]
+    assert any("parsed 2 of 3" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("old,new,problem", [
+    ("/stargazers", "/stars", "no row has star counts"),
+    ("stars today", "new stars", "no row has 'N stars today' counts"),
+    ("repository_id", "repo_key", "no row has repository ids"),
+])
+def test_a_field_missing_on_every_row_is_a_layout_problem(old, new, problem):
+    page = FIXTURE.replace(old, new).replace("1 star today", "1 new star")
+    rows = tr.parse(page)
+    assert len(rows) == 3, "names still parse, which is what made this silent"
+    assert problem in tr.layout_problems(rows)
+
+
+def test_a_field_missing_on_one_row_is_not_a_problem():
+    rows = tr.parse(FIXTURE)
+    rows[1].stars = None
+    assert tr.layout_problems(rows) == []
+
+
+def test_refresh_stores_and_tracks_the_fixture_board(conn, monkeypatch):
+    monkeypatch.setattr(tr, "fetch", lambda **kw: FIXTURE)
+    res = ingest.refresh_trending(conn, Config(), since="daily", ts=5000)
+    assert res["rows"] == 3 and res["repos_added"] == 3
+    assert [r["full_name"] for r in db.trending_at(conn, 5000, "daily", "")] == [
+        "example-org/rocket-cache", "sample-labs/docs-only", "solo-dev/tiny"]
+    assert db.last_snapshot(conn, 810001)["stars"] == 4210
+
+
+@pytest.mark.parametrize("old,new", [('class="Box-row"', 'class="TrendRow"'),
+                                     ("/stargazers", "/stars")])
+def test_refresh_refuses_a_broken_page_and_stores_nothing(conn, monkeypatch, old, new):
+    monkeypatch.setattr(tr, "fetch", lambda **kw: FIXTURE.replace(old, new))
+    with pytest.raises(RuntimeError, match="layout may have changed"):
+        ingest.refresh_trending(conn, Config(), since="daily", ts=5000)
+    assert db.trending_times(conn, "daily", "") == []
+    assert conn.execute("SELECT COUNT(*) FROM repos").fetchone()[0] == 0

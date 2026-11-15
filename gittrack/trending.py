@@ -11,9 +11,10 @@ snapshotting rather than just reading:
     who just entered, who is climbing, and who has held on for days rather than
     spiking for an afternoon.
 
-The page is scraped, so the selectors here are the fragile part. `parse` reports
-how many rows it recovered so a silent layout change surfaces as "0 of 25
-parsed" rather than as an empty trending table.
+The page is scraped, so the selectors here are the fragile part. `parse` warns
+when it recovers fewer rows than the page has ("parsed 0 of 25"), and
+`layout_problems` names a field that no row has, so ingest can refuse a board
+whose markup changed instead of storing it with blank counts.
 """
 
 from __future__ import annotations
@@ -76,7 +77,8 @@ def humanise_period(seconds: float) -> str:
             return f"{n} {label}{'s' if n != 1 else ''}"
     return f"{seconds / 86400:.1f} days"
 
-_BLOCK = '<article class="Box-row">'
+# Matches the row tag even if GitHub adds a class or attribute to it.
+_BLOCK = re.compile(r'<article\b[^>]*\bclass="(?:[^"]*\s)?Box-row(?:\s[^"]*)?"[^>]*>')
 _NAME = re.compile(r'<h2[^>]*class="[^"]*lh-condensed[^"]*"[^>]*>\s*<a[^>]*href="/([^"?]+)"', re.S)
 _RID = re.compile(r'repository_id&quot;:(\d+)')
 _DESC = re.compile(r'<p[^>]*class="col-9[^"]*"[^>]*>\s*(.*?)\s*</p>', re.S)
@@ -135,27 +137,44 @@ def _text(raw: str | None) -> str | None:
 
 
 def parse(page: str) -> list[TrendingRow]:
-    blocks = page.split(_BLOCK)[1:]
+    blocks = _BLOCK.split(page)[1:]
     rows: list[TrendingRow] = []
     for i, b in enumerate(blocks, 1):
         name = _NAME.search(b)
         if not name:
             continue
-        rid = _RID.search(b)
+        rid, desc, lang = _RID.search(b), _DESC.search(b), _LANG.search(b)
+        stars, forks, period = _STARS.search(b), _FORKS.search(b), _PERIOD.search(b)
         rows.append(TrendingRow(
             rank=i,
             full_name=name.group(1).strip().strip("/"),
             repo_id=_int(rid.group(1)) if rid else None,
-            description=_text(_DESC.search(b).group(1) if _DESC.search(b) else None),
-            language=(_LANG.search(b).group(1) if _LANG.search(b) else None),
-            stars=_int(_STARS.search(b).group(1) if _STARS.search(b) else None),
-            forks=_int(_FORKS.search(b).group(1) if _FORKS.search(b) else None),
-            period_stars=_int(_PERIOD.search(b).group(1) if _PERIOD.search(b) else None),
+            description=_text(desc.group(1) if desc else None),
+            language=lang.group(1) if lang else None,
+            stars=_int(stars.group(1) if stars else None),
+            forks=_int(forks.group(1) if forks else None),
+            period_stars=_int(period.group(1) if period else None),
         ))
-    if blocks and not rows:
-        log.warning("found %d trending blocks but parsed 0 rows — the page layout "
-                    "has probably changed", len(blocks))
+    if len(rows) < len(blocks):
+        log.warning("parsed %d of %d trending rows; the page layout has probably "
+                    "changed", len(rows), len(blocks))
     return rows
+
+
+def layout_problems(rows: list[TrendingRow]) -> list[str]:
+    """Reasons a parsed board cannot be trusted, empty when it looks sound.
+
+    A selector that stops matching does not raise: it yields None on every row.
+    The board then still stores ranks, but surge (period stars over total stars)
+    and auto-tracking (which keys on repo_id) go quietly blank. A field missing
+    on one row is normal; missing on every row means the page changed.
+    """
+    if not rows:
+        return ["no parseable rows"]
+    checks = (("stars", "star counts"), ("period_stars", "'N stars today' counts"),
+              ("repo_id", "repository ids"))
+    return [f"no row has {label}" for field, label in checks
+            if all(getattr(r, field) is None for r in rows)]
 
 
 def fetch(since: str = "daily", language: str = "", spoken: str = "",
