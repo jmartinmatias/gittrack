@@ -282,6 +282,7 @@ gittrack serve         # dashboard on http://127.0.0.1:8787
 
 | Command | What it does |
 |---|---|
+| `gittrack init` | Write `gittrack.toml` and create the database. `--force` overwrites an existing config. |
 | `gittrack digest` | The shortlist: what deserves attention right now, and why. `--json`, `--notify`, `--include-seen` |
 | `gittrack scorecard` | Did the digest's picks outgrow the board over the next 24h? `--horizon`, `--json` |
 | `gittrack seen owner/name` | Mark a repo reviewed so the digest moves on. `--note`, `--undo`, `--list` |
