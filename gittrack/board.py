@@ -49,13 +49,14 @@ def fork_signals(conn, names: list[str], period: float) -> dict:
     """
     out = {}
     for name in names:
-        row = db.repo_by_name(conn, name)
-        if row is None:
-            continue
-        obs = db.load_series(conn, row["id"])
         rec = {"forks": None, "stars": None, "fork_ratio": None,
                "fork_delta": None, "fork_rel": None, "star_rel": None,
                "fork_confirm": None, "span_days": 0.0}
+        # A board row whose repo is not tracked (auto_track off, `trending
+        # --no-track`, or a row without a repository id) still gets a record:
+        # the caller reads these keys on every row.
+        row = db.repo_by_name(conn, name)
+        obs = db.load_series(conn, row["id"]) if row is not None else []
         if not obs:
             out[name] = rec
             continue
@@ -94,115 +95,118 @@ def combined_board(conn, language: str, over: float,
     not the same size (19 / 23 / 20 today), so a raw rank would quietly weight
     the shortest board highest.
     """
-    if True:
-        ranks, sizes, detail, period = {}, {}, {}, {}
+    ranks, sizes, detail, period = {}, {}, {}, {}
+    for b in ALL_BOARDS:
+        times = db.trending_times(conn, b, language, limit=1)
+        if not times:
+            ranks[b], sizes[b] = {}, 0
+            continue
+        rows = db.trending_at(conn, times[0], b, language)
+        ranks[b] = {r["full_name"]: r["rank"] for r in rows}
+        sizes[b] = len(rows)
+        for r in rows:
+            d = detail.setdefault(r["full_name"], {})
+            for k in ("repo_language", "stars", "forks", "repo_id"):
+                if d.get(k) is None:
+                    d[k] = r[k]
+            period.setdefault(r["full_name"], {})[b] = r["period_stars"]
+
+    hist = {b: db.trending_rank_series(conn, b, language, int(time.time() - over))
+            for b in ALL_BOARDS}
+    accel = db.latest_accel(conn, language)
+    names = set().union(*[set(v) for v in ranks.values()]) if ranks else set()
+    out = []
+    for name in names:
+        d = detail.get(name, {})
+        per, score = {}, 0.0
         for b in ALL_BOARDS:
-            times = db.trending_times(conn, b, language, limit=1)
-            if not times:
-                ranks[b], sizes[b] = {}, 0
-                continue
-            rows = db.trending_at(conn, times[0], b, language)
-            ranks[b] = {r["full_name"]: r["rank"] for r in rows}
-            sizes[b] = len(rows)
-            for r in rows:
-                d = detail.setdefault(r["full_name"], {})
-                for k in ("repo_language", "stars", "forks", "repo_id"):
-                    if d.get(k) is None:
-                        d[k] = r[k]
-                period.setdefault(r["full_name"], {})[b] = r["period_stars"]
+            rk = ranks[b].get(name)
+            per[b] = rk
+            if rk and sizes[b]:
+                score += (sizes[b] - rk + 1) / sizes[b]
+        shares = {}
+        for b, ps in period.get(name, {}).items():
+            if ps and d.get("stars"):
+                # A period count can exceed the current total when stars are
+                # removed after being counted, which would render as "more
+                # than all of its stars arrived" — clamp rather than show it.
+                shares[b] = min(1.0, ps / d["stars"])
+        best_share_board = max(shares, key=shares.get) if shares else None
+        # Sparkline the board the repo currently stands highest on — that is
+        # the one whose movement actually describes it.
+        present = [(rk, b) for b, rk in per.items() if rk]
+        home = min(present)[1] if present else "daily"
+        trend = rank_trend(hist[home].get(name, []), sizes.get(home) or None)
+        trend["board"] = home
+        # Hold on the repo's home board: the share of that board's readings in
+        # which it held a place. Computed from history already in hand rather
+        # than by re-running the summary three times.
+        board_reads = len({t for series in hist[home].values() for t, _ in series})
+        appearances = len(hist[home].get(name, []))
+        hold = (appearances / board_reads) if board_reads else None
+        streak, streak_from = db.trending_streak(conn, name, "daily", language)
+        out.append({
+            "accel": accel.get(name),
+            "trend": trend,
+            "full_name": name, "repo_id": d.get("repo_id"),
+            "language": d.get("repo_language"), "stars": d.get("stars"),
+            "forks": d.get("forks"),
+            "also_on": per,
+            "board_count": sum(1 for v in per.values() if v is not None),
+            "score": round(score, 4),
+            "period_by_board": period.get(name, {}),
+            "share": shares.get(best_share_board) if best_share_board else None,
+            "share_board": best_share_board,
+            "period_stars": period.get(name, {}).get(best_share_board),
+            "streak": streak, "streak_from": streak_from,
+            "hold": hold, "appearances": appearances,
+            "hold_board": home, "board_readings": board_reads,
+            "url": f"https://github.com/{name}",
+        })
+    # Fork movement, computed from our snapshots (no GitHub forks board exists).
+    forks = fork_signals(conn, [r["full_name"] for r in out], over)
+    for r in out:
+        for k, v in forks.get(r["full_name"], {}).items():
+            # Snapshot values win when we have them; "no snapshot yet" must not
+            # blank the star and fork counts the board itself showed.
+            if v is not None or k not in r:
+                r[k] = v
+        r["star_component"] = r["score"] / len(ALL_BOARDS)
 
-        hist = {b: db.trending_rank_series(conn, b, language, int(time.time() - over))
-                for b in ALL_BOARDS}
-        accel = db.latest_accel(conn, language)
-        names = set().union(*[set(v) for v in ranks.values()]) if ranks else set()
-        out = []
-        for name in names:
-            d = detail.get(name, {})
-            per, score = {}, 0.0
-            for b in ALL_BOARDS:
-                rk = ranks[b].get(name)
-                per[b] = rk
-                if rk and sizes[b]:
-                    score += (sizes[b] - rk + 1) / sizes[b]
-            shares = {}
-            for b, ps in period.get(name, {}).items():
-                if ps and d.get("stars"):
-                    # A period count can exceed the current total when stars are
-                    # removed after being counted, which would render as "more
-                    # than all of its stars arrived" — clamp rather than show it.
-                    shares[b] = min(1.0, ps / d["stars"])
-            best_share_board = max(shares, key=shares.get) if shares else None
-            # Sparkline the board the repo currently stands highest on — that is
-            # the one whose movement actually describes it.
-            present = [(rk, b) for b, rk in per.items() if rk]
-            home = min(present)[1] if present else "daily"
-            trend = rank_trend(hist[home].get(name, []), sizes.get(home) or None)
-            trend["board"] = home
-            # Hold on the repo's home board: the share of that board's readings in
-            # which it held a place. Computed from history already in hand rather
-            # than by re-running the summary three times.
-            board_reads = len({t for series in hist[home].values() for t, _ in series})
-            appearances = len(hist[home].get(name, []))
-            hold = (appearances / board_reads) if board_reads else None
-            streak, streak_from = db.trending_streak(conn, name, "daily", language)
-            out.append({
-                "accel": accel.get(name),
-                "trend": trend,
-                "full_name": name, "repo_id": d.get("repo_id"),
-                "language": d.get("repo_language"), "stars": d.get("stars"),
-                "forks": d.get("forks"),
-                "also_on": per,
-                "board_count": sum(1 for v in per.values() if v is not None),
-                "score": round(score, 4),
-                "period_by_board": period.get(name, {}),
-                "share": shares.get(best_share_board) if best_share_board else None,
-                "share_board": best_share_board,
-                "period_stars": period.get(name, {}).get(best_share_board),
-                "streak": streak, "streak_from": streak_from,
-                "hold": hold, "appearances": appearances,
-                "hold_board": home, "board_readings": board_reads,
-                "url": f"https://github.com/{name}",
-            })
-        # Fork movement, computed from our snapshots (no GitHub forks board exists).
-        forks = fork_signals(conn, [r["full_name"] for r in out], over)
-        for r in out:
-            r.update(forks.get(r["full_name"], {}))
-            r["star_component"] = r["score"] / len(ALL_BOARDS)
+    # Cross-sectional fork rank, over the repos that actually have history.
+    with_fork = sorted((r["fork_rel"] for r in out if r["fork_rel"] is not None))
+    fork_ready = len(with_fork)
+    for r in out:
+        if r["fork_rel"] is not None and with_fork:
+            r["fork_component"] = mx.pct_rank(with_fork, r["fork_rel"])
+        else:
+            r["fork_component"] = None
+        # 60/40: stars lead because that is what the boards actually rank,
+        # forks adjust because they are the adoption signal rather than the
+        # attention one. Unknown fork data is neutral, never a penalty.
+        fc = 0.5 if r["fork_component"] is None else r["fork_component"]
+        r["score_both"] = round(0.6 * r["star_component"] + 0.4 * fc, 4)
 
-        # Cross-sectional fork rank, over the repos that actually have history.
-        with_fork = sorted((r["fork_rel"] for r in out if r["fork_rel"] is not None))
-        fork_ready = len(with_fork)
-        for r in out:
-            if r["fork_rel"] is not None and with_fork:
-                r["fork_component"] = mx.pct_rank(with_fork, r["fork_rel"])
-            else:
-                r["fork_component"] = None
-            # 60/40: stars lead because that is what the boards actually rank,
-            # forks adjust because they are the adoption signal rather than the
-            # attention one. Unknown fork data is neutral, never a penalty.
-            fc = 0.5 if r["fork_component"] is None else r["fork_component"]
-            r["score_both"] = round(0.6 * r["star_component"] + 0.4 * fc, 4)
+    key = {"stars": lambda r: (-r["score"], r["full_name"]),
+           "forks": lambda r: (-(r["fork_rel"] if r["fork_rel"] is not None else -1),
+                               -(r["fork_ratio"] or 0), r["full_name"]),
+           # Pure strength: what share of the repo's whole life arrived now.
+           "surge": lambda r: (-(r["share"] or 0), r["full_name"]),
+           "both": lambda r: (-r["score_both"], r["full_name"])}[rank_by]
+    out.sort(key=key)
+    for i, r in enumerate(out, 1):
+        r["rank"] = i
 
-        key = {"stars": lambda r: (-r["score"], r["full_name"]),
-               "forks": lambda r: (-(r["fork_rel"] if r["fork_rel"] is not None else -1),
-                                   -(r["fork_ratio"] or 0), r["full_name"]),
-               # Pure strength: what share of the repo's whole life arrived now.
-               "surge": lambda r: (-(r["share"] or 0), r["full_name"]),
-               "both": lambda r: (-r["score_both"], r["full_name"])}[rank_by]
-        out.sort(key=key)
-        for i, r in enumerate(out, 1):
-            r["rank"] = i
-
-        return {
-            "since": "combined", "language": language, "over": over,
-            "rank_by": rank_by, "fork_ready": fork_ready,
-            "combined": True, "board": out, "gone": [],
-            "boards": [dict(b) for b in db.trending_boards(conn)],
-            "all_boards": list(ALL_BOARDS),
-            "board_sizes": sizes,
-            "readings": sum(1 for b in ALL_BOARDS if sizes[b]),
-            "over_label": tr.humanise_period(over),
-            "compare_label": None, "base_ts": None, "ts": None,
-            "empty": None if out else
-                     "No readings stored yet. Run: gittrack trending",
-        }
+    return {
+        "since": "combined", "language": language, "over": over,
+        "rank_by": rank_by, "fork_ready": fork_ready,
+        "combined": True, "board": out, "gone": [],
+        "boards": [dict(b) for b in db.trending_boards(conn)],
+        "all_boards": list(ALL_BOARDS),
+        "board_sizes": sizes,
+        "readings": sum(1 for b in ALL_BOARDS if sizes[b]),
+        "over_label": tr.humanise_period(over),
+        "compare_label": None, "base_ts": None, "ts": None,
+        "empty": None if out else
+                 "No readings stored yet. Run: gittrack trending",
+    }
