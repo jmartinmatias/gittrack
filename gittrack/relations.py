@@ -5,14 +5,14 @@ Three kinds, in descending order of how much they can be trusted:
 1. **Same owner.** Exact, no false positives. One organisation pushing several
    repos onto the board at once is a deliberate act, not a coincidence.
 2. **Shared vocabulary.** Repos whose name and description share an uncommon
-   term. This is what surfaces a *wave* — when a third of the board is talking
+   term. This is what surfaces a *wave*: when a third of the board is talking
    about the same thing, that is the story, not any individual repo.
 3. **Co-movement.** Repos that appear on and drop off the board together,
    reported as *cohorts* rather than pairs. Pairs badly overstate this: eight
    repos that turned over in one board refresh produce twenty-eight pairs at a
    perfect score, which reads like twenty-eight discoveries and is really one
-   event. Grouping by identical presence says the true thing — "these eight
-   moved as a block" — and a large block is usually the board refreshing rather
+   event. Grouping by identical presence says the true thing ("these eight
+   moved as a block"), and a large block is usually the board refreshing rather
    than any affinity between its members, so the size is reported too.
 """
 
@@ -61,7 +61,7 @@ def themes(repos: list[dict], min_repos: int = MIN_THEME_REPOS,
            limit: int = 12) -> list[dict]:
     """Terms shared by several repos, most-shared first.
 
-    `share` is the fraction of the board carrying the term — the number that says
+    `share` is the fraction of the board carrying the term: the number that says
     whether something is a wave or a coincidence.
     """
     toks = {r["full_name"]: tokenise(r["full_name"], r.get("description"))

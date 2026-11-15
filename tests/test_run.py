@@ -2,7 +2,7 @@
 
 The API snapshot spends rate-limit quota; the trending sweep spends none. They
 must fail independently, or the free half goes stale whenever the paid half is
-throttled — which, unauthenticated, is most of the time.
+throttled, which, unauthenticated, is most of the time.
 """
 
 from argparse import Namespace

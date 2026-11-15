@@ -38,7 +38,7 @@ def rank_trend(series: list[tuple[int, int]], board_size: int | None = None) -> 
 def fork_signals(conn, names: list[str], period: float) -> dict:
     """Fork movement per repo, derived from our own snapshot series.
 
-    GitHub publishes no forks board — Trending ranks by stars alone — so this is
+    GitHub publishes no forks board (Trending ranks by stars alone), so this is
     computed rather than scraped. Two different things come out of it:
 
       * `fork_ratio` (forks / stars) is available immediately and says how
@@ -129,10 +129,10 @@ def combined_board(conn, language: str, over: float,
             if ps and d.get("stars"):
                 # A period count can exceed the current total when stars are
                 # removed after being counted, which would render as "more
-                # than all of its stars arrived" — clamp rather than show it.
+                # than all of its stars arrived". Clamp rather than show it.
                 shares[b] = min(1.0, ps / d["stars"])
         best_share_board = max(shares, key=shares.get) if shares else None
-        # Sparkline the board the repo currently stands highest on — that is
+        # Sparkline the board the repo currently stands highest on: that is
         # the one whose movement actually describes it.
         present = [(rk, b) for b, rk in per.items() if rk]
         home = min(present)[1] if present else "daily"

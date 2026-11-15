@@ -1,7 +1,7 @@
 """GitHub Trending: fetch, parse, and diff successive snapshots.
 
 Trending is GitHub's own answer to "what is gaining traction right now", and it
-costs no API quota — it is a public HTML page. Two things make it worth
+costs no API quota: it is a public HTML page. Two things make it worth
 snapshotting rather than just reading:
 
   * It surfaces repos you are **not** already tracking. Polling a top-N universe

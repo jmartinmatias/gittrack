@@ -372,7 +372,7 @@ def _job_snapshot() -> dict:
 
 
 def _run_fetch(cfg: Config, kind: str, since: str, language: str) -> None:
-    """Worker body. Never raises — failures are reported through the job record."""
+    """Worker body. Never raises: failures are reported through the job record."""
     conn = db.connect(cfg.db_path)
     steps, added_total, rows_total = [], 0, 0
     try:
@@ -387,7 +387,7 @@ def _run_fetch(cfg: Config, kind: str, since: str, language: str) -> None:
                     steps.append(f"{b}/{language or 'all'}: {r['rows']} rows, "
                                  f"+{r['repos_added']} new repos")
                 except Exception as exc:
-                    steps.append(f"{b}/{language or 'all'}: FAILED — {exc}")
+                    steps.append(f"{b}/{language or 'all'}: FAILED: {exc}")
                 with _JOB_LOCK:
                     _JOB["steps"] = list(steps)
                 # Be a polite scraper; skip the wait after the last board.

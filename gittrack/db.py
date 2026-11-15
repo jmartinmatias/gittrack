@@ -468,7 +468,7 @@ def trending_streak(conn: sqlite3.Connection, full_name: str, since: str,
     """(consecutive readings on the board, first ts of that streak).
 
     Walks the board's own reading times backwards, so a repo that dropped off and
-    returned reports only its current run — not its lifetime total.
+    returned reports only its current run, not its lifetime total.
     """
     times = [r["ts"] for r in conn.execute(
         "SELECT DISTINCT ts FROM trending WHERE since = ? AND language = ?"
